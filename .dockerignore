@@ -1,0 +1,15 @@
+**/bin/
+**/obj/
+**/App_Data/
+**/appsettings*.json
+**/*.local.json
+**/.env
+**/.env.*
+**/.neon
+**/node_modules/
+**/.git/
+**/.idea/
+.agents/
+.claude/
+tests/
+deploy/

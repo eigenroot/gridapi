@@ -1,0 +1,12 @@
+{
+  "name": "grid-api",
+  "private": true,
+  "scripts": {
+    "build": "dotnet build Grid.API.sln --configuration Release",
+    "test": "dotnet test Grid.API.sln --configuration Release"
+  },
+  "dependencies": {
+    "@neon/config": "^1.9.6",
+    "@neon/env": "^1.6.6"
+  }
+}

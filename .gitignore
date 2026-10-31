@@ -1,0 +1,15 @@
+bin/
+obj/
+*.user
+.vs/
+.idea/
+appsettings.*.local.json
+.env
+.env.*
+!.env.example
+.neon
+node_modules/
+App_Data/
+.DS_Store
+.agents/
+skills-lock.json

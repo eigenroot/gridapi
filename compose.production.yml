@@ -1,0 +1,54 @@
+name: grid
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  api:
+    image: ${GRID_API_IMAGE:?Set GRID_API_IMAGE in .env}
+    restart: unless-stopped
+    init: true
+    env_file:
+      - path: .env
+        format: raw
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: "8080"
+      ReverseProxy__TrustForwardedHeaders: "true"
+      Media__RootPath: /app/App_Data/media
+      Media__PublicBaseUrl: https://${API_DOMAIN:?Set API_DOMAIN in .env}
+      AllowedHosts: ${API_DOMAIN:?Set API_DOMAIN in .env}
+      Docs__Enabled: "false"
+      Kyc__Provider: None
+      Kyc__RunWorker: "false"
+      Otp__DevelopmentMode: "false"
+      Logging__LogLevel__Default: Information
+      Logging__LogLevel__Microsoft.AspNetCore: Warning
+    volumes:
+      - media:/app/App_Data/media
+    logging: *logging
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?Set API_DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+    logging: *logging
+
+volumes:
+  media:
+  caddy_data:
+  caddy_config:

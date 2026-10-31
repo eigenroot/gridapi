@@ -148,6 +148,16 @@ services.AddOpenApi();
 
 var app = builder.Build();
 
+// A deployment can apply migrations once and exit before starting HTTP or workers.
+if (config.GetValue<bool>("Database:MigrateOnly"))
+{
+    await using var scope = app.Services.CreateAsyncScope();
+    var db = scope.ServiceProvider.GetRequiredService<GridDbContext>();
+    await db.Database.MigrateAsync();
+    Console.WriteLine("Database migrations completed.");
+    return;
+}
+
 // ---- Pipeline ----
 if (config.GetValue<bool>("ReverseProxy:TrustForwardedHeaders")) app.UseForwardedHeaders();
 app.UseMiddleware<ErrorHandlingMiddleware>();

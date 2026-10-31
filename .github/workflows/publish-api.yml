@@ -1,4 +1,4 @@
-name: Build, test, and publish API
+name: Build, release, and deploy API
 
 on:
   push:
@@ -41,6 +41,8 @@ jobs:
         run: dotnet build Grid.API.sln --configuration Release
       - name: Test against isolated PostgreSQL databases
         run: dotnet test Grid.API.sln --configuration Release --no-build --logger "console;verbosity=normal"
+      - name: Test release versioning and deployment recovery
+        run: python3 -m unittest discover -s tests/deploy -v
 
   publish:
     needs: verify
@@ -48,8 +50,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      contents: read
+      contents: write
       packages: write
+    concurrency:
+      group: grid-api-publish-${{ github.sha }}
+      cancel-in-progress: false
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      image: ${{ steps.release.outputs.image }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -61,11 +69,72 @@ jobs:
       - name: Build and publish Linux AMD64 image
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
-          docker build --pull --platform linux/amd64 \
-            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
-            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
-            --tag "$image:$GITHUB_SHA" .
-          docker push "$image:$GITHUB_SHA"
+          if ! docker manifest inspect "$image:$GITHUB_SHA" > /dev/null 2>&1; then
+            docker build --pull --platform linux/amd64 \
+              --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+              --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+              --tag "$image:$GITHUB_SHA" .
+            docker push "$image:$GITHUB_SHA"
+          fi
+          docker pull "$image:$GITHUB_SHA"
           docker tag "$image:$GITHUB_SHA" "$image:latest"
           docker push "$image:latest"
           printf 'Published image: `%s:%s`\n' "$image" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+      - name: Create versioned image and GitHub Release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 deploy/create-release.py
+
+  deploy:
+    needs: publish
+    if: needs.publish.outputs.version != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    concurrency:
+      group: grid-api-production
+      cancel-in-progress: false
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+      RELEASE_VERSION: ${{ needs.publish.outputs.version }}
+      RELEASE_IMAGE: ${{ needs.publish.outputs.image }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Deploy release and check HTTPS health
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          latest=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          if [[ "$latest" != "$GITHUB_SHA" ]]; then
+            echo 'A newer main commit exists; keeping this release and skipping its older deployment.'
+            exit 0
+          fi
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS; do
+            if [[ -z "${!name}" ]]; then
+              echo "Missing repository secret: $name" >&2
+              exit 1
+            fi
+          done
+          umask 077
+          credentials=$(mktemp -d "$RUNNER_TEMP/grid-ssh.XXXXXXXX")
+          trap 'rm -rf -- "$credentials"' EXIT
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$credentials/key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$credentials/known_hosts"
+          target="$DEPLOY_USER@$DEPLOY_HOST"
+          ssh_options=(-i "$credentials/key" -o BatchMode=yes -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$credentials/known_hosts"
+            -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
+          ssh "${ssh_options[@]}" "$target" 'umask 077; mkdir -p /opt/grid/.deploy-bin'
+          scp "${ssh_options[@]}" deploy/deploy-release.sh "$target:/opt/grid/.deploy-bin/deploy-release.sh"
+          printf '%s' "$GH_TOKEN" | ssh "${ssh_options[@]}" "$target" \
+            "bash /opt/grid/.deploy-bin/deploy-release.sh '$RELEASE_IMAGE' '$GITHUB_SHA' '$RELEASE_VERSION' '$GITHUB_ACTOR'"
+          printf 'Deployed `%s` to https://grid-api.eigenroot.com\n' "$RELEASE_VERSION" >> "$GITHUB_STEP_SUMMARY"

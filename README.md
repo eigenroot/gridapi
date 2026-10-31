@@ -15,12 +15,13 @@ Client calling conventions are in [`docs/api-integration.md`](docs/api-integrati
 
 ## Production deployment
 
-The API repository is `janprince/GRIDAPI`. GitHub Actions builds and tests each
-change; successful `main` builds publish Linux AMD64 images to
-`ghcr.io/janprince/gridapi`, tagged with the commit SHA and `latest`.
-The Droplet pulls a selected image and runs the API behind Caddy at
-`https://grid-api.eigenroot.com`. Publishing an image does not automatically
-deploy it to the Droplet. See [the deployment guide](deploy/README.md).
+The API repository is `eigenroot/gridapi`. GitHub Actions builds and tests pull
+requests. Successful updates to `main`, including merged pull requests, publish a
+Linux AMD64 image to `ghcr.io/eigenroot/gridapi`, create a versioned GitHub Release
+with generated notes, and deploy that exact commit to the Droplet. Releases begin
+at `v0.1.0` and automatically increment the patch version; rerunning one commit
+reuses its existing release. The API runs behind Caddy at
+`https://grid-api.eigenroot.com`. See [the deployment guide](deploy/README.md).
 
 Connection strings and application/provider secrets belong in .NET user-secrets
 for local development and `/opt/grid/.env` on the server. They are not included

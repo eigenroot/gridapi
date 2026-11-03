@@ -49,6 +49,9 @@ public class PhoneNumbersTests
 
     [Theory]
     [InlineData(UtilityType.Ecg, "0123 4567 89", "0123456789")]
+    [InlineData(UtilityType.Ecg, "733342761", "733342761")] // Nine-digit ECG account number.
+    [InlineData(UtilityType.Ecg, "G13304130", "G13304130")]
+    [InlineData(UtilityType.Ecg, "p191177631", "P191177631")]
     [InlineData(UtilityType.Water, "40-123-456", "40123456")]
     [InlineData(UtilityType.Airtime, "0558151870", "233558151870")]
     [InlineData(UtilityType.DataBundle, "+233 20 123 4567", "233201234567")]
@@ -59,7 +62,9 @@ public class PhoneNumbersTests
     }
 
     [Theory]
-    [InlineData(UtilityType.Ecg, "123456789")]      // 9 < 10 digits
+    [InlineData(UtilityType.Ecg, "12345678")]      // Too short for ECG Direct account/meter identifiers.
+    [InlineData(UtilityType.Ecg, "abcdefghi")]
+    [InlineData(UtilityType.Ecg, "73334276!")]
     [InlineData(UtilityType.Dstv, "123456789012")]  // 12 > 11 digits
     [InlineData(UtilityType.Water, "ABC12345")]
     [InlineData(UtilityType.Airtime, "0302123456")]

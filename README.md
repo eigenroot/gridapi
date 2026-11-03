@@ -92,6 +92,7 @@ Every key can be set from the environment with `__` for `:`, e.g. `Sms__Provider
 | `Media:RootPath` | Where uploaded files are stored (`App_Data/media` by default; mount a volume in production) |
 | `Media:MaxBytes`, `Media:TicketMinutes` | Upload limit (25 MB) and how long an upload link stays valid (15 min) |
 | `Media:PublicBaseUrl` | Optional origin for upload URLs. Without it, the request's scheme and host are used |
+| `Payments:*` | Hubtel bill payments; see [docs/bill-payments.md](docs/bill-payments.md#configuration-payments). **Live calls only work from the whitelisted Droplet IP** |
 | `Payouts:EncryptionKey` | Base64 of 32 random bytes (`openssl rand -base64 32`). It encrypts payout account numbers. **Losing it makes the stored numbers unreadable** |
 
 ## How it fits together
@@ -130,8 +131,8 @@ Every key can be set from the environment with `__` for `:`, e.g. `Sms__Provider
 src/Grid.Api/
   Common/          envelope, errors, validation, phone numbers
   Data/            DbContext, migrations, development seed
-  Features/        Auth, Catalogue, Consumers, Kyc, Media, Properties, Providers, UtilityAccounts
-  Integrations/    Sms (Log, Arkesel, Hubtel, router), Hubtel (name lookup)
+  Features/        Auth, BillPayments, Catalogue, Consumers, Kyc, Media, Properties, Providers, UtilityAccounts
+  Integrations/    Sms (Log, Arkesel, Hubtel, router), Hubtel (name lookup, payments)
 ```
 
 Adding a migration:
@@ -140,11 +141,22 @@ Adding a migration:
 dotnet ef migrations add <Name> -p src/Grid.Api -o Data/Migrations
 ```
 
+## Bill payments
+
+ECG, Ghana Water, DStv/GOtv/StarTimes, data, airtime and Telecel Broadband are paid through Hubtel.
+An order prompts the customer's own number with Direct Receive Money. A worker in the API process
+then pays the bill from the Disbursement float, refunds it through the Refund API if the bill
+fails, and keeps the float topped up from collections.
+
+Five tables hold it all: `orders`, `bills`, `refunds`, `float_transfers` and `order_events`. See
+[docs/bill-payments.md](docs/bill-payments.md) for the contract, safety rules, configuration and
+go-live checklist. It is off by default.
+
 ## Not built yet
 
 - **Ops review of provider applications.** Nothing moves an application past `Submitted` yet, and media reads are owner-only until reviewers exist.
 - **Going online** (`PUT /provider-accounts/me/operating-status`, `providers.not_job_ready`).
 - **Virus scanning and cleanup of abandoned uploads.**
-- **Payments and utility purchases.**
+- **Card payments**, and paying from a number other than the signed-in one.
 - **SMS delivery-receipt webhooks.** Provider message ids are kept on `otp_challenges` so they can be added.
 - **Ops endpoints**, including a KYC read.

@@ -20,6 +20,13 @@ public sealed class ErrorHandlingMiddleware(RequestDelegate next, ILogger<ErrorH
             await Envelope.WriteErrorAsync(context, StatusCodes.Status400BadRequest,
                 "request.malformed", "The request could not be read.");
         }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateException ex) when (!context.Response.HasStarted
+            && ex.InnerException is Npgsql.PostgresException { SqlState: "23505", TableName: "orders" or "bills" or "refunds" or "float_transfers" })
+        {
+            // Two requests raced to create the same payment row; the unique key kept only one.
+            await Envelope.WriteErrorAsync(context, StatusCodes.Status409Conflict,
+                "payments.conflict", "This payment is already being processed. Read the order again.");
+        }
         catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
         {
             // The client went away; nothing to send.

@@ -10,7 +10,7 @@ using Microsoft.EntityFrameworkCore.Design;
 
 namespace Grid.Api.Data;
 
-public sealed class GridDbContext(DbContextOptions<GridDbContext> options, TimeProvider time)
+public sealed partial class GridDbContext(DbContextOptions<GridDbContext> options, TimeProvider time)
     : DbContext(options)
 {
     public DbSet<Consumer> Consumers => Set<Consumer>();
@@ -40,6 +40,8 @@ public sealed class GridDbContext(DbContextOptions<GridDbContext> options, TimeP
 
     protected override void OnModelCreating(ModelBuilder model)
     {
+        ConfigureBillPayments(model);
+
         model.Entity<Consumer>(e =>
         {
             e.HasIndex(c => c.PhoneNumber).IsUnique();
@@ -321,6 +323,7 @@ public sealed class GridDbContext(DbContextOptions<GridDbContext> options, TimeP
 
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken ct = default)
     {
+        ProtectOrderEvents();
         var now = time.GetUtcNow();
         foreach (var entry in ChangeTracker.Entries<Entity>())
         {

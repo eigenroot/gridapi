@@ -106,16 +106,45 @@ GET  /properties/{id}                 PUT  /properties/{id}    DELETE /propertie
 
 GET  /utility-accounts?type=Ecg       POST /utility-accounts
 GET  /utility-accounts/{id}           PUT  /utility-accounts/{id}  DELETE /utility-accounts/{id}  (archives)
-     { type, accountNumber, nickname, propertyId?, isDefault? }
+     { type, accountNumber, nickname, propertyId?, isDefault?, network?, ecgKind? }
 ```
 
 - **Homes.** The first home becomes the default (`isPrimary`). Archiving the default hands it to the
   most recently added remaining home, and unlinks saved accounts from the archived one.
 - **Saved accounts.**
   - `type` is one of `Ecg`, `Water`, `Dstv`, `Gotv`, `Startimes`, `Airtime`, `DataBundle`, `Internet`.
-  - The server owns the digit-length rules. Airtime and data numbers come back in `233…` form.
+  - The server owns identifier rules. ECG accepts alphanumeric meter identifiers and nine-digit
+    account numbers. Airtime and data numbers come back in `233…` form.
   - The first account of a utility becomes its default. Sending `isDefault: true` moves the default.
-  - `lastPaidAt`, `lastAmount` and `dueDate` stay null until payments exist.
+  - `network` (`Mtn`, `Telecel`, `AirtelTigo`) is only for `Airtime` and `DataBundle`. It defaults to
+    the number's original network; send it to override a ported number.
+  - `ecgKind` (`Prepaid`, `Postpaid`) is only for `Ecg` and defaults to `Prepaid`.
+  - `lastPaidAt` and `lastAmount` come from the newest delivered bill paid with that saved account.
+    `dueDate` is always null, because no biller reports one.
+
+## Bill payments
+
+Bills are paid through Hubtel. The full contract, states and operations guide are in
+[bill-payments.md](bill-payments.md).
+
+```
+GET  /bill-products                    catalogue: code, lookup, amountRule, enabled
+GET  /payment-channels                 { channels[], suggested, payerPhone }
+POST /bill-lookups                     { productCode, accountNumber?, phoneNumber?, meterNumber? }   stateless
+POST /orders        Idempotency-Key    { productCode, amount, accountNumber?, phoneNumber?, meterNumber?, bundle?, channel?, savedAccountId?, propertyId? }
+GET  /orders/{id}                      poll until status is final
+GET  /orders?limit=&before=            GET /orders/{id}/receipt
+```
+
+- **Placing an order prompts the signed-in number.** Show "Approve on your phone" while
+  `nextAction` is present, and poll `GET /orders/{id}` with backoff.
+- **`status`** is `AwaitingPayment`, `PaymentFailed`, `Processing`, `Completed`, `Refunding` or
+  `Refunded`. Only `Completed` means the bill was paid. `PaymentFailed` is final: to retry, place a
+  new order with a new key.
+- **Data bundles** come from the lookup. Send the bundle's `value` as `bundle`, and its exact price
+  as `amount`.
+- **Hubtel's charge** comes on top of `total`. The order returns the real `charges` and
+  `amountCharged` as soon as the prompt is sent.
 
 ## Media upload
 
@@ -238,6 +267,15 @@ There is no push channel, so clients poll for the decision.
 | `quotes.self_approval_forbidden` | A provider cannot approve their own quote |
 | `media.unsupported_type` / `media.too_large` / `media.not_uploaded` | Upload rejected |
 | `media.upload_expired` / `media.already_confirmed` / `media.already_attached` / `media.wrong_purpose` | Upload link or attachment misuse |
+| `payments.disabled` / `bills.product_paused` | Bill payments, or this product, are switched off (**503**) |
+| `bills.account_not_found` / `bills.no_meters` / `bills.no_bundles` | The biller doesn't know that account, phone or number |
+| `bills.meter_selection_required` | Several ECG meters on that phone (**409**); `detail` lists them, so send `meterNumber` |
+| `bills.email_required` | Ghana Water needs an email on the profile |
+| `bills.saved_account_mismatch` | `savedAccountId` isn't for this bill |
+| `payments.idempotency_required` / `payments.idempotency_conflict` | Missing `Idempotency-Key`, or the same key reused for a different order |
+| `payments.receipt_not_ready` | The order hasn't been paid yet |
+| `payments.provider_unavailable` | Hubtel didn't answer; try again shortly |
+| `payments.rate_limited` | Too many orders or lookups in a minute |
 
 ## Jobs
 

@@ -5,8 +5,8 @@ namespace Grid.Api.Features.UtilityAccounts;
 public enum UtilityType { Ecg, Water, Dstv, Gotv, Startimes, Airtime, DataBundle, Internet }
 
 /// <summary>
-/// Account-number rules per utility. These mirror <c>GRID/lib/core/models/utility_type.dart</c>;
-/// the server is the authority, so a change there must be made here too.
+/// Account-number rules per utility. The server is authoritative. ECG Direct supports
+/// alphanumeric meter identifiers and nine-digit account numbers; clients must accept those too.
 /// </summary>
 public static class UtilityTypeRules
 {
@@ -14,7 +14,7 @@ public static class UtilityTypeRules
 
     private static readonly Dictionary<UtilityType, Rule> Rules = new()
     {
-        [UtilityType.Ecg] = new(10, 13, false, "Meter number"),
+        [UtilityType.Ecg] = new(9, 20, false, "ECG meter/account identifier"),
         [UtilityType.Water] = new(8, 12, false, "Account number"),
         [UtilityType.Dstv] = new(10, 11, false, "Smartcard number"),
         [UtilityType.Gotv] = new(10, 11, false, "IUC number"),
@@ -26,7 +26,7 @@ public static class UtilityTypeRules
 
     /// <summary>
     /// Normalises an account number for <paramref name="type"/>: phone numbers become
-    /// <c>233XXXXXXXXX</c>, everything else is digits only. Returns null and an error message
+    /// <c>233XXXXXXXXX</c>, ECG identifiers retain their letter prefix, other utilities are digits only. Returns null and an error message
     /// when it isn't valid.
     /// </summary>
     public static string? Normalize(UtilityType type, string? input, out string? error)
@@ -43,6 +43,13 @@ public static class UtilityTypeRules
 
         var raw = (input ?? "").Trim();
         var compact = new string(raw.Where(c => c is not (' ' or '-')).ToArray());
+        if (type == UtilityType.Ecg)
+        {
+            if (compact.Length >= rule.MinDigits && compact.Length <= rule.MaxDigits
+                && compact.All(char.IsAsciiLetterOrDigit) && compact.Any(char.IsAsciiDigit)) return compact.ToUpperInvariant();
+            error = "Enter a 9–20 character ECG meter or account identifier using letters and digits.";
+            return null;
+        }
         if (compact.Length == 0 || !compact.All(char.IsAsciiDigit))
         {
             error = $"{rule.Label} must contain digits only.";

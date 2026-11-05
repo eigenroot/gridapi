@@ -178,6 +178,530 @@ namespace Grid.Api.Data.Migrations
                     b.ToTable("refresh_tokens", (string)null);
                 });
 
+            modelBuilder.Entity("Grid.Api.Features.BillPayments.Bill", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("amount");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempts");
+
+                    b.Property<int>("Checks")
+                        .HasColumnType("integer")
+                        .HasColumnName("checks");
+
+                    b.Property<string>("ClientReference")
+                        .IsRequired()
+                        .HasMaxLength(36)
+                        .HasColumnType("character varying(36)")
+                        .HasColumnName("client_reference");
+
+                    b.Property<decimal?>("Commission")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasColumnName("commission");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset?>("DeliveredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("delivered_at");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("error_code");
+
+                    b.Property<string>("ExternalReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("external_reference");
+
+                    b.Property<string>("HubtelTransactionId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("hubtel_transaction_id");
+
+                    b.Property<DateTimeOffset?>("LeaseUntil")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lease_until");
+
+                    b.Property<DateTimeOffset?>("NextCheckAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("next_check_at");
+
+                    b.Property<Guid>("OrderId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("order_id");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("state");
+
+                    b.Property<DateTimeOffset?>("SubmittedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("submitted_at");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_bills");
+
+                    b.HasIndex("ClientReference")
+                        .IsUnique()
+                        .HasDatabaseName("ix_bills_client_reference");
+
+                    b.HasIndex("NextCheckAt")
+                        .HasDatabaseName("ix_bills_next_check_at")
+                        .HasFilter("next_check_at IS NOT NULL");
+
+                    b.HasIndex("OrderId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_bills_order_id");
+
+                    b.ToTable("bills", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_bills_amount", "amount > 0");
+                        });
+                });
+
+            modelBuilder.Entity("Grid.Api.Features.BillPayments.FloatTransfer", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("amount");
+
+                    b.Property<int>("Checks")
+                        .HasColumnType("integer")
+                        .HasColumnName("checks");
+
+                    b.Property<string>("ClientReference")
+                        .IsRequired()
+                        .HasMaxLength(36)
+                        .HasColumnType("character varying(36)")
+                        .HasColumnName("client_reference");
+
+                    b.Property<DateTimeOffset?>("ConfirmedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("confirmed_at");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("error_code");
+
+                    b.Property<DateTimeOffset?>("LeaseUntil")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lease_until");
+
+                    b.Property<DateTimeOffset?>("NextCheckAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("next_check_at");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("state");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_float_transfers");
+
+                    b.HasIndex("ClientReference")
+                        .IsUnique()
+                        .HasDatabaseName("ix_float_transfers_client_reference");
+
+                    b.HasIndex("NextCheckAt")
+                        .HasDatabaseName("ix_float_transfers_next_check_at")
+                        .HasFilter("next_check_at IS NOT NULL");
+
+                    b.ToTable("float_transfers", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_float_transfers_amount", "amount > 0");
+                        });
+                });
+
+            modelBuilder.Entity("Grid.Api.Features.BillPayments.Order", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("AccountNumber")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("account_number");
+
+                    b.Property<decimal?>("AmountCharged")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("amount_charged");
+
+                    b.Property<decimal?>("AmountPaid")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("amount_paid");
+
+                    b.Property<string>("Bundle")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("bundle");
+
+                    b.Property<string>("Channel")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("channel");
+
+                    b.Property<decimal?>("Charges")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("charges");
+
+                    b.Property<int>("Checks")
+                        .HasColumnType("integer")
+                        .HasColumnName("checks");
+
+                    b.Property<string>("ClientReference")
+                        .IsRequired()
+                        .HasMaxLength(36)
+                        .HasColumnType("character varying(36)")
+                        .HasColumnName("client_reference");
+
+                    b.Property<Guid>("ConsumerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("consumer_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("CustomerName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("customer_name");
+
+                    b.Property<string>("Destination")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("destination");
+
+                    b.Property<decimal>("Fee")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("fee");
+
+                    b.Property<string>("HubtelOrderId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("hubtel_order_id");
+
+                    b.Property<string>("HubtelTransactionId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("hubtel_transaction_id");
+
+                    b.Property<string>("IdempotencyKeyHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("idempotency_key_hash");
+
+                    b.Property<DateTimeOffset?>("LeaseUntil")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lease_until");
+
+                    b.Property<bool>("NameConfirmed")
+                        .HasColumnType("boolean")
+                        .HasColumnName("name_confirmed");
+
+                    b.Property<bool>("NeedsReview")
+                        .HasColumnType("boolean")
+                        .HasColumnName("needs_review");
+
+                    b.Property<DateTimeOffset?>("NextCheckAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("next_check_at");
+
+                    b.Property<DateTimeOffset?>("PaidAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("paid_at");
+
+                    b.Property<string>("PayerPhone")
+                        .IsRequired()
+                        .HasMaxLength(12)
+                        .HasColumnType("character varying(12)")
+                        .HasColumnName("payer_phone");
+
+                    b.Property<string>("PaymentError")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("payment_error");
+
+                    b.Property<string>("PaymentState")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("payment_state");
+
+                    b.Property<decimal>("Principal")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("principal");
+
+                    b.Property<string>("ProductCode")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("product_code");
+
+                    b.Property<Guid?>("PropertyId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("property_id");
+
+                    b.Property<string>("ReceiptEmail")
+                        .HasMaxLength(254)
+                        .HasColumnType("character varying(254)")
+                        .HasColumnName("receipt_email");
+
+                    b.Property<string>("RequestHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("request_hash");
+
+                    b.Property<string>("ReviewReason")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("review_reason");
+
+                    b.Property<Guid?>("SavedAccountId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("saved_account_id");
+
+                    b.Property<string>("SessionId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("session_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("status");
+
+                    b.Property<decimal>("Total")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("total");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_orders");
+
+                    b.HasIndex("ClientReference")
+                        .IsUnique()
+                        .HasDatabaseName("ix_orders_client_reference");
+
+                    b.HasIndex("NextCheckAt")
+                        .HasDatabaseName("ix_orders_next_check_at")
+                        .HasFilter("next_check_at IS NOT NULL");
+
+                    b.HasIndex("ConsumerId", "IdempotencyKeyHash")
+                        .IsUnique()
+                        .HasDatabaseName("ix_orders_consumer_id_idempotency_key_hash");
+
+                    b.HasIndex("ConsumerId", "CreatedAt", "Id")
+                        .HasDatabaseName("ix_orders_consumer_id_created_at_id");
+
+                    b.ToTable("orders", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_orders_amounts", "principal > 0 AND fee >= 0 AND total = principal + fee");
+                        });
+                });
+
+            modelBuilder.Entity("Grid.Api.Features.BillPayments.OrderEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid?>("ActorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("actor_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Detail")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("detail");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("kind");
+
+                    b.Property<Guid?>("OrderId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("order_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_order_events");
+
+                    b.HasIndex("OrderId", "CreatedAt")
+                        .HasDatabaseName("ix_order_events_order_id_created_at");
+
+                    b.ToTable("order_events", (string)null);
+                });
+
+            modelBuilder.Entity("Grid.Api.Features.BillPayments.Refund", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("amount");
+
+                    b.Property<int>("Checks")
+                        .HasColumnType("integer")
+                        .HasColumnName("checks");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
+
+                    b.Property<Guid?>("CompletedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("completed_by");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("error_code");
+
+                    b.Property<string>("Evidence")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("evidence");
+
+                    b.Property<string>("ExternalReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("external_reference");
+
+                    b.Property<DateTimeOffset?>("LeaseUntil")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lease_until");
+
+                    b.Property<string>("Method")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("method");
+
+                    b.Property<DateTimeOffset?>("NextCheckAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("next_check_at");
+
+                    b.Property<Guid>("OrderId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("order_id");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("reason");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("state");
+
+                    b.Property<DateTimeOffset?>("SubmittedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("submitted_at");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_refunds");
+
+                    b.HasIndex("ExternalReference")
+                        .IsUnique()
+                        .HasDatabaseName("ix_refunds_external_reference")
+                        .HasFilter("external_reference IS NOT NULL");
+
+                    b.HasIndex("NextCheckAt")
+                        .HasDatabaseName("ix_refunds_next_check_at")
+                        .HasFilter("next_check_at IS NOT NULL");
+
+                    b.HasIndex("OrderId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_refunds_order_id");
+
+                    b.ToTable("refunds", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_refunds_amount", "amount > 0");
+                        });
+                });
+
             modelBuilder.Entity("Grid.Api.Features.Catalogue.ServiceArea", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1960,9 +2484,19 @@ namespace Grid.Api.Data.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<string>("EcgKind")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("ecg_kind");
+
                     b.Property<bool>("IsDefault")
                         .HasColumnType("boolean")
                         .HasColumnName("is_default");
+
+                    b.Property<string>("Network")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("network");
 
                     b.Property<string>("Nickname")
                         .IsRequired()
@@ -2015,6 +2549,45 @@ namespace Grid.Api.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_refresh_tokens_consumers_consumer_id");
+                });
+
+            modelBuilder.Entity("Grid.Api.Features.BillPayments.Bill", b =>
+                {
+                    b.HasOne("Grid.Api.Features.BillPayments.Order", null)
+                        .WithMany()
+                        .HasForeignKey("OrderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_bills_orders_order_id");
+                });
+
+            modelBuilder.Entity("Grid.Api.Features.BillPayments.Order", b =>
+                {
+                    b.HasOne("Grid.Api.Features.Consumers.Consumer", null)
+                        .WithMany()
+                        .HasForeignKey("ConsumerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_orders_consumers_consumer_id");
+                });
+
+            modelBuilder.Entity("Grid.Api.Features.BillPayments.OrderEvent", b =>
+                {
+                    b.HasOne("Grid.Api.Features.BillPayments.Order", null)
+                        .WithMany()
+                        .HasForeignKey("OrderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_order_events_orders_order_id");
+                });
+
+            modelBuilder.Entity("Grid.Api.Features.BillPayments.Refund", b =>
+                {
+                    b.HasOne("Grid.Api.Features.BillPayments.Order", null)
+                        .WithMany()
+                        .HasForeignKey("OrderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_refunds_orders_order_id");
                 });
 
             modelBuilder.Entity("Grid.Api.Features.Catalogue.ServiceCategory", b =>

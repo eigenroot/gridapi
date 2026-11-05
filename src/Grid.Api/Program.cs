@@ -3,6 +3,7 @@ using System.Threading.RateLimiting;
 using Grid.Api.Common;
 using Grid.Api.Data;
 using Grid.Api.Features.Auth;
+using Grid.Api.Features.BillPayments;
 using Grid.Api.Features.Catalogue;
 using Grid.Api.Features.Consumers;
 using Grid.Api.Features.Kyc;
@@ -23,6 +24,9 @@ var builder = WebApplication.CreateBuilder(args);
 var services = builder.Services;
 var config = builder.Configuration;
 
+// Hubtel callback URLs carry signatures; keep full request URLs out of the logs.
+builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
+
 // ---- Options (validated at startup so a bad deploy fails fast) ----
 services.AddOptions<OtpOptions>().Bind(config.GetSection(OtpOptions.Section)).ValidateOnStart();
 services.AddOptions<JwtOptions>().Bind(config.GetSection(JwtOptions.Section)).ValidateOnStart();
@@ -30,12 +34,14 @@ services.AddOptions<SmsOptions>().Bind(config.GetSection(SmsOptions.Section)).Va
 services.AddOptions<KycOptions>().Bind(config.GetSection(KycOptions.Section)).ValidateOnStart();
 services.AddOptions<MediaOptions>().Bind(config.GetSection(MediaOptions.Section)).ValidateOnStart();
 services.AddOptions<PayoutOptions>().Bind(config.GetSection(PayoutOptions.Section)).ValidateOnStart();
+services.AddOptions<BillPaymentOptions>().Bind(config.GetSection(BillPaymentOptions.Section)).ValidateOnStart();
 services.AddSingleton<IValidateOptions<OtpOptions>, OtpOptionsValidator>();
 services.AddSingleton<IValidateOptions<JwtOptions>, JwtOptionsValidator>();
 services.AddSingleton<IValidateOptions<SmsOptions>, SmsOptionsValidator>();
 services.AddSingleton<IValidateOptions<KycOptions>, KycOptionsValidator>();
 services.AddSingleton<IValidateOptions<MediaOptions>, MediaOptionsValidator>();
 services.AddSingleton<IValidateOptions<PayoutOptions>, PayoutOptionsValidator>();
+services.AddSingleton<IValidateOptions<BillPaymentOptions>, BillPaymentOptionsValidator>();
 
 if (builder.Environment.IsProduction() && config.GetValue<bool>("Otp:DevelopmentMode"))
     throw new InvalidOperationException("Otp:DevelopmentMode must not be enabled in Production.");
@@ -82,6 +88,18 @@ else
 }
 services.AddScoped<KycProcessor>();
 services.AddHostedService<KycWorker>();
+
+// ---- Bill payments through Hubtel; Payments:Enabled opens them to customers ----
+services.AddHttpClient<HubtelPayments>()
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false, ConnectTimeout = TimeSpan.FromSeconds(10) })
+    .RemoveAllLoggers();
+services.AddSingleton<CallbackUrls>();
+services.AddScoped<OrderTransitions>();
+services.AddScoped<OrderService>();
+services.AddScoped<HubtelCallbackHandler>();
+services.AddScoped<FinanceService>();
+services.AddScoped<BillPaymentProcessor>();
+services.AddHostedService<BillPaymentWorker>();
 
 // ---- Auth ----
 services.AddScoped<OtpService>();
@@ -136,11 +154,21 @@ services.AddRateLimiter(o =>
             PermitLimit = config.GetValue("RateLimits:OtpPerIpPerHour", 30),
             Window = TimeSpan.FromHours(1),
         }));
+    // Each order prompts a wallet; this keeps a stuck client from spamming the customer.
+    o.AddPolicy(BillPaymentEndpoints.RateLimitPolicy, http => RateLimitPartition.GetFixedWindowLimiter(
+        http.User.FindFirst("sub")?.Value ?? http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = config.GetValue("RateLimits:PaymentsPerUserPerMinute", 30),
+            Window = TimeSpan.FromMinutes(1),
+        }));
     o.OnRejected = async (ctx, _) =>
     {
         var retryAfter = ctx.Lease.TryGetMetadata(MetadataName.RetryAfter, out var r) ? (int)r.TotalSeconds : 3600;
+        var policy = ctx.HttpContext.GetEndpoint()?.Metadata.GetMetadata<Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute>()?.PolicyName;
         await Envelope.WriteErrorAsync(ctx.HttpContext, StatusCodes.Status429TooManyRequests,
-            "auth.otp_rate_limited", "Too many requests. Try again later.", new { retryAfterSeconds = retryAfter });
+            policy == BillPaymentEndpoints.RateLimitPolicy ? "payments.rate_limited" : "auth.otp_rate_limited",
+            "Too many requests. Try again later.", new { retryAfterSeconds = retryAfter });
     };
 });
 
@@ -189,6 +217,7 @@ api.MapProviderApplicationEndpoints();
 api.MapProviderSetupEndpoints();
 api.MapProviderEvidenceEndpoints();
 api.MapPayoutMethodEndpoints();
+api.MapBillPaymentEndpoints();
 
 // Unknown routes get the envelope too.
 app.MapFallback((HttpContext http) =>

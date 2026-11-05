@@ -1,6 +1,7 @@
 using Grid.Api.Common;
 using Grid.Api.Data;
 using Grid.Api.Features.Consumers;
+using Grid.Api.Features.BillPayments;
 using Microsoft.EntityFrameworkCore;
 
 namespace Grid.Api.Features.UtilityAccounts;
@@ -10,11 +11,14 @@ public sealed record UtilityAccountRequest(
     string? AccountNumber,
     string? Nickname,
     Guid? PropertyId,
-    bool? IsDefault);
+    bool? IsDefault,
+    PhoneNetwork? Network = null,
+    EcgMeterKind? EcgKind = null);
 
 /// <summary>
-/// <c>lastPaidAt</c>, <c>lastAmount</c> and <c>dueDate</c> are part of the app's model but come
-/// from payments, which don't exist yet; they are always null for now.
+/// <c>lastPaidAt</c> and <c>lastAmount</c> come from the newest delivered bill paid with this saved
+/// account. <c>dueDate</c> is part of the app's model, but no biller reports one; it is
+/// always null.
 /// </summary>
 public sealed record UtilityAccountResponse(
     Guid Id,
@@ -23,16 +27,20 @@ public sealed record UtilityAccountResponse(
     string Nickname,
     Guid? PropertyId,
     bool IsDefault,
+    PhoneNetwork? Network,
+    EcgMeterKind? EcgKind,
     DateTimeOffset? LastPaidAt,
     decimal? LastAmount,
     DateTimeOffset? DueDate,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt)
 {
-    public static UtilityAccountResponse From(UtilityAccount a) =>
-        new(a.Id, a.Type, a.AccountNumber, a.Nickname, a.PropertyId, a.IsDefault,
-            null, null, null, a.CreatedAt, a.UpdatedAt);
+    public static UtilityAccountResponse From(UtilityAccount a, LastPayment? last = null) =>
+        new(a.Id, a.Type, a.AccountNumber, a.Nickname, a.PropertyId, a.IsDefault, a.Network, a.EcgKind,
+            last?.PaidAt, last?.Amount, null, a.CreatedAt, a.UpdatedAt);
 }
+
+public sealed record LastPayment(DateTimeOffset PaidAt, decimal Amount);
 
 public static class UtilityAccountEndpoints
 {
@@ -57,14 +65,17 @@ public static class UtilityAccountEndpoints
         if (type is { } t) query = query.Where(a => a.Type == t);
 
         var rows = await query.OrderBy(a => a.Type).ThenBy(a => a.CreatedAt).ToListAsync(ct);
-        return Envelope.Ok(rows.Select(UtilityAccountResponse.From).ToList());
+        var last = await LastPaymentsAsync(db, rows.Select(a => a.Id).ToList(), ct);
+        return Envelope.Ok(rows.Select(a => UtilityAccountResponse.From(a, last.GetValueOrDefault(a.Id))).ToList());
     }
 
     private static async Task<EnvelopeResult<UtilityAccountResponse>> Get(
         Guid id, CurrentConsumer current, GridDbContext db, CancellationToken ct)
     {
         var consumerId = (await current.LoadAsync(ct)).Id;
-        return Envelope.Ok(UtilityAccountResponse.From(await FindOwnedAsync(db, consumerId, id, ct)));
+        var account = await FindOwnedAsync(db, consumerId, id, ct);
+        var last = await LastPaymentsAsync(db, [account.Id], ct);
+        return Envelope.Ok(UtilityAccountResponse.From(account, last.GetValueOrDefault(account.Id)));
     }
 
     /// <summary>Saves a payee. The first account of a utility type becomes its default.</summary>
@@ -88,6 +99,8 @@ public static class UtilityAccountEndpoints
             Nickname = input.Nickname,
             PropertyId = input.PropertyId,
             IsDefault = makeDefault,
+            Network = input.Network,
+            EcgKind = input.EcgKind,
         };
 
         await using var tx = await db.Database.BeginTransactionAsync(ct);
@@ -118,10 +131,13 @@ public static class UtilityAccountEndpoints
         account.Nickname = input.Nickname;
         account.PropertyId = input.PropertyId;
         account.IsDefault = makeDefault;
+        account.Network = input.Network;
+        account.EcgKind = input.EcgKind;
         await SaveAsync(db, ct);
         await tx.CommitAsync(ct);
 
-        return Envelope.Ok(UtilityAccountResponse.From(account));
+        var last = await LastPaymentsAsync(db, [account.Id], ct);
+        return Envelope.Ok(UtilityAccountResponse.From(account, last.GetValueOrDefault(account.Id)));
     }
 
     /// <summary>Archives the account; if it was the default, the newest remaining one of that type takes over.</summary>
@@ -189,7 +205,22 @@ public static class UtilityAccountEndpoints
     private static ApiException Duplicate() =>
         Errors.Conflict("utility_accounts.duplicate", "You've already saved this account.");
 
-    private sealed record ValidInput(UtilityType Type, string AccountNumber, string Nickname, Guid? PropertyId, bool? IsDefault);
+    /// <summary>The newest delivered bill per saved account.</summary>
+    private static async Task<Dictionary<Guid, LastPayment>> LastPaymentsAsync(GridDbContext db, List<Guid> accountIds, CancellationToken ct)
+    {
+        var paid = await (
+            from order in db.Orders
+            join bill in db.Bills on order.Id equals bill.OrderId
+            where order.SavedAccountId != null && accountIds.Contains(order.SavedAccountId.Value)
+                  && bill.State == TxnState.Succeeded && bill.DeliveredAt != null
+            select new { AccountId = order.SavedAccountId!.Value, PaidAt = bill.DeliveredAt!.Value, order.Principal })
+            .ToListAsync(ct);
+        return paid.GroupBy(p => p.AccountId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(p => p.PaidAt).Select(p => new LastPayment(p.PaidAt, p.Principal)).First());
+    }
+
+    private sealed record ValidInput(UtilityType Type, string AccountNumber, string Nickname, Guid? PropertyId, bool? IsDefault,
+        PhoneNetwork? Network, EcgMeterKind? EcgKind);
 
     private static async Task<ValidInput> ValidateAsync(
         GridDbContext db, Guid consumerId, UtilityAccountRequest body, CancellationToken ct)
@@ -209,6 +240,10 @@ public static class UtilityAccountEndpoints
                     fields: [new FieldError("accountNumber", error!)]);
             }
         }
+        var phoneType = body.Type is UtilityType.Airtime or UtilityType.DataBundle;
+        if (body.Network is not null && (!phoneType || body.Network == PhoneNetwork.Unknown))
+            v.Add("network", phoneType ? "Choose MTN, Telecel or AirtelTigo." : "Only airtime and data accounts have a network.");
+        if (body.EcgKind is not null && body.Type != UtilityType.Ecg) v.Add("ecgKind", "Only ECG accounts are prepaid or postpaid.");
         v.ThrowIfInvalid();
 
         if (body.PropertyId is { } propertyId)
@@ -218,6 +253,10 @@ public static class UtilityAccountEndpoints
             if (!owned) throw Errors.NotFound("properties.not_found", "That home was not found.");
         }
 
-        return new ValidInput(body.Type!.Value, number!, nickname, body.PropertyId, body.IsDefault);
+        var network = phoneType ? body.Network ?? Guess(number!) : null;
+        var ecgKind = body.Type == UtilityType.Ecg ? body.EcgKind ?? EcgMeterKind.Prepaid : (EcgMeterKind?)null;
+        return new ValidInput(body.Type!.Value, number!, nickname, body.PropertyId, body.IsDefault, network, ecgKind);
+
+        static PhoneNetwork? Guess(string phone) => PhoneNumbers.GuessNetwork(phone) is var n && n != PhoneNetwork.Unknown ? n : null;
     }
 }

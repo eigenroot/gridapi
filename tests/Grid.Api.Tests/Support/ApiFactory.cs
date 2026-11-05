@@ -19,7 +19,7 @@ namespace Grid.Api.Tests.Support;
 /// <c>GRID_TEST_DB</c> (a connection string without a database name); it defaults to the local
 /// server as the current OS user.
 /// </summary>
-public sealed partial class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
+public partial class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
     private readonly string _database = $"grid_api_test_{Guid.NewGuid():N}";
     private readonly string _mediaRoot = Path.Combine(Path.GetTempPath(), $"grid_api_test_media_{Guid.NewGuid():N}");

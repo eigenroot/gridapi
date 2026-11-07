@@ -374,6 +374,22 @@ public sealed class BillPaymentFlowTests
         Assert.Null(await rig.Factory.WithDbAsync(db => db.Bills.SingleOrDefaultAsync()));
     }
 
+    [Fact]
+    public async Task Paid_amount_that_includes_hubtels_charge_still_pays_the_bill()
+    {
+        await using var rig = await Rig.CreateAsync();
+        var id = await rig.PlaceIdAsync();
+        var reference = (await rig.OrderRowAsync(id)).ClientReference;
+        // Customer bears the charge: Hubtel reports 100 + its 1.00 charge as the amount.
+        await Json.ExpectSuccessAsync(await rig.Client.PostAsJsonAsync(rig.CallbackPath(reference), Rig.Callback(reference, 101m)));
+        await rig.PumpAsync();
+        var order = await rig.OrderRowAsync(id);
+        Assert.False(order.NeedsReview);
+        Assert.Equal(OrderStatus.Processing, order.Status);
+        Assert.Equal(100m, (await rig.Factory.WithDbAsync(db => db.Bills.SingleAsync())).Amount);
+        Assert.Null(await rig.Factory.WithDbAsync(db => db.Refunds.SingleOrDefaultAsync()));
+    }
+
     // ---- Float ----
 
     [Fact]

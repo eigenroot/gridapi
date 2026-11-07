@@ -47,6 +47,13 @@ public sealed class OrderTransitions(GridDbContext db, IOptions<BillPaymentOptio
         Event(order.Id, "PaymentSubmitted", $"{order.PaymentState} {result.ErrorCode}".Trim());
     }
 
+    /// <summary>
+    /// Whether Hubtel took the order's total. Depending on how the account bears charges, Hubtel
+    /// reports <c>Amount</c> either as what we asked for or with its charge already added on.
+    /// </summary>
+    private static bool CoversTotal(Order order, HubtelResult result) =>
+        result.Amount == order.Total || (result.Charges is { } charges && result.Amount - charges == order.Total);
+
     /// <summary>The payment's outcome, from a callback or a status check.</summary>
     public async Task PaymentOutcomeAsync(Order order, HubtelResult result, CancellationToken ct)
     {
@@ -57,7 +64,7 @@ public sealed class OrderTransitions(GridDbContext db, IOptions<BillPaymentOptio
         switch (result.Outcome)
         {
             case HubtelOutcome.Succeeded when order.PaymentState == TxnState.Succeeded:
-                if ((result.Amount is { } again && again != order.AmountPaid)
+                if ((result.Amount is { } again && again != order.AmountPaid && !CoversTotal(order, result))
                     || (result.TransactionId is { } id && order.HubtelTransactionId is { } known && id != known))
                     Review(order, "payment_evidence_conflict");
                 return;
@@ -76,7 +83,7 @@ public sealed class OrderTransitions(GridDbContext db, IOptions<BillPaymentOptio
                 Event(order.Id, "PaymentConfirmed", Money(result.Amount));
 
                 if (result.Amount is not { } paid) Review(order, "payment_amount_missing");
-                else if (paid != order.Total)
+                else if (!CoversTotal(order, result))
                 {
                     Review(order, "payment_amount_mismatch");
                     await OpenRefundAsync(order, paid, "AmountMismatch", ct);

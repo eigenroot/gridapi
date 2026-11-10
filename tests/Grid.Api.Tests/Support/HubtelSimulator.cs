@@ -251,6 +251,8 @@ public sealed class PaymentApiFactory(HubtelSimulator simulator, bool docs = fal
         if (spans is not null && logs is not null)
         {
             builder.UseSetting("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318");
+            // The production image ships no appsettings.json, so its filters can't be relied on.
+            builder.UseSetting("Logging:LogLevel:Microsoft.EntityFrameworkCore.Database.Command", "Information");
             builder.ConfigureServices(services =>
             {
                 services.ConfigureOpenTelemetryTracerProvider(tracing => tracing.AddInMemoryExporter(spans));

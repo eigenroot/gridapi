@@ -129,6 +129,7 @@ public sealed class BillPaymentFlowTests
         var failure = Assert.Single(records, r => r.FormattedMessage?.Contains("PaymentFailed") == true && r.FormattedMessage.Contains("hubtel.2001"));
         Assert.Equal(LogLevel.Warning, failure.LogLevel);
         Assert.DoesNotContain(records, r => r.FormattedMessage?.Contains(signature) == true);
+        Assert.DoesNotContain(records, r => r.CategoryName == "Microsoft.EntityFrameworkCore.Database.Command" && r.LogLevel < LogLevel.Warning);
     }
 
     // ---- Payments that don't go through ----

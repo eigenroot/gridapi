@@ -26,6 +26,8 @@ var config = builder.Configuration;
 
 // Hubtel callback URLs carry signatures; keep full request URLs out of the logs.
 builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
+// The payment worker polls constantly, and the production image has no appsettings.json to quiet this.
+builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.Warning);
 builder.AddGridTelemetry();
 
 // ---- Options (validated at startup so a bad deploy fails fast) ----

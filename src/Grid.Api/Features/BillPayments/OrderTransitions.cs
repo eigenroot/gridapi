@@ -313,8 +313,13 @@ public sealed class OrderTransitions(GridDbContext db, IOptions<BillPaymentOptio
         Event(order.Id, "ReviewRequired", reason);
     }
 
-    public void Event(Guid? orderId, string kind, string detail = "", Guid? actor = null) =>
+    public void Event(Guid? orderId, string kind, string detail = "", Guid? actor = null)
+    {
         db.OrderEvents.Add(new OrderEvent { OrderId = orderId, Kind = kind, Detail = detail, ActorId = actor });
+        // Hubtel's answers only exist in the detail, so this line is what log alerts read.
+        var level = detail.Contains("hubtel.", StringComparison.Ordinal) ? LogLevel.Warning : LogLevel.Information;
+        logger.Log(level, "Order event {OrderEvent} for {OrderId}: {EventDetail}", kind, orderId, detail);
+    }
 
     /// <summary>Backs off from 30 seconds to hourly; after a day unresolved, flags the order and checks daily.</summary>
     private void Recheck(Order order, IScheduled row, DateTimeOffset since)

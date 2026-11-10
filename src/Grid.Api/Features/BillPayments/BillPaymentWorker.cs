@@ -292,6 +292,7 @@ public sealed class BillPaymentWorker(IServiceScopeFactory scopes, IOptions<Bill
                 if (DateTimeOffset.UtcNow >= nextFloatCheck)
                 {
                     await processor.CheckFloatAsync(stoppingToken);
+                    logger.LogInformation("Bill payment worker heartbeat");
                     nextFloatCheck = DateTimeOffset.UtcNow.AddMinutes(options.Value.Float.CheckMinutes);
                 }
             }

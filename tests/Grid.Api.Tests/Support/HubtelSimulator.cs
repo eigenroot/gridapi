@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using OpenTelemetry.Logs;
+using OpenTelemetry.Trace;
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net.Http.Json;
@@ -236,7 +239,7 @@ public sealed class HubtelSimulator : IAsyncDisposable
     }
 }
 
-public sealed class PaymentApiFactory(HubtelSimulator simulator, bool docs = false) : ApiFactory
+public sealed class PaymentApiFactory(HubtelSimulator simulator, bool docs = false, List<Activity>? spans = null, List<LogRecord>? logs = null) : ApiFactory
 {
     public const string FinancePhone = "233209990000";
 
@@ -245,6 +248,15 @@ public sealed class PaymentApiFactory(HubtelSimulator simulator, bool docs = fal
         base.ConfigureWebHost(builder);
         builder.UseSetting("Docs:Enabled", docs.ToString());
         builder.UseSetting("Payments:Enabled", "true");
+        if (spans is not null && logs is not null)
+        {
+            builder.UseSetting("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318");
+            builder.ConfigureServices(services =>
+            {
+                services.ConfigureOpenTelemetryTracerProvider(tracing => tracing.AddInMemoryExporter(spans));
+                services.ConfigureOpenTelemetryLoggerProvider(logging => logging.AddInMemoryExporter(logs));
+            });
+        }
         builder.UseSetting("Payments:RunWorker", "false");
         builder.UseSetting("Payments:CallbackBaseUrl", "https://grid-callback.test");
         // Tests drive outcomes through status checks, so don't wait for an overdue callback.

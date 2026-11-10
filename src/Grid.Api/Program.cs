@@ -26,6 +26,7 @@ var config = builder.Configuration;
 
 // Hubtel callback URLs carry signatures; keep full request URLs out of the logs.
 builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
+builder.AddGridTelemetry();
 
 // ---- Options (validated at startup so a bad deploy fails fast) ----
 services.AddOptions<OtpOptions>().Bind(config.GetSection(OtpOptions.Section)).ValidateOnStart();

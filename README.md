@@ -92,6 +92,7 @@ Every key can be set from the environment with `__` for `:`, e.g. `Sms__Provider
 | `Media:RootPath` | Where uploaded files are stored (`App_Data/media` by default; mount a volume in production) |
 | `Media:MaxBytes`, `Media:TicketMinutes` | Upload limit (25 MB) and how long an upload link stays valid (15 min) |
 | `Media:PublicBaseUrl` | Optional origin for upload URLs. Without it, the request's scheme and host are used |
+| `OTEL_EXPORTER_OTLP_*` | Sends traces, metrics and logs to Grafana Cloud when set; see [docs/observability.md](docs/observability.md). |
 | `Payments:*` | Hubtel bill payments; see [docs/bill-payments.md](docs/bill-payments.md#configuration-payments). **Live calls only work from the whitelisted Droplet IP** |
 | `Payouts:EncryptionKey` | Base64 of 32 random bytes (`openssl rand -base64 32`). It encrypts payout account numbers. **Losing it makes the stored numbers unreadable** |
 

@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using Microsoft.Extensions.Logging;
+using OpenTelemetry.Logs;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -90,6 +93,42 @@ public sealed class BillPaymentFlowTests
         rig.Config.Hubtel.EnforceCallbackIp = true;
         await Json.ExpectErrorAsync(await rig.Client.PostAsJsonAsync(rig.CallbackPath(reference), Rig.Callback(reference, 100m)), 403, "payments.callback_forbidden");
         Assert.Equal(TxnState.Pending, (await rig.OrderRowAsync(id)).PaymentState);
+    }
+
+    // ---- Telemetry ----
+
+    [Fact]
+    public async Task Telemetry_keeps_signatures_and_phone_numbers_out_and_skips_health_checks()
+    {
+        var spans = new List<Activity>();
+        var logs = new List<LogRecord>();
+        await using var rig = await Rig.CreateAsync(spans: spans, logs: logs);
+        await rig.LookupAsync(new { productCode = "EcgPrepaid", accountNumber = "P20314039" });
+        var id = await rig.PlaceIdAsync();
+        var reference = (await rig.OrderRowAsync(id)).ClientReference;
+        var path = rig.CallbackPath(reference);
+        var signature = path[(path.LastIndexOf('/') + 1)..];
+        await Json.ExpectSuccessAsync(await rig.Client.PostAsJsonAsync(path, Rig.Callback(reference, 100m, "2001")));
+        await rig.Client.GetAsync("/health");
+
+        Activity? Callback() { lock (spans) return spans.Find(s => s.Kind == ActivityKind.Server && s.GetTagItem("http.route")?.ToString()?.Contains("callbacks") == true); }
+        for (var i = 0; i < 50 && Callback() is null; i++) await Task.Delay(100);
+        Assert.Equal("/api/v1/hubtel/callbacks", Callback()!.GetTagItem("url.path"));
+
+        List<Activity> exported;
+        lock (spans) exported = [.. spans];
+        Assert.Contains(exported, s => s.Kind == ActivityKind.Client); // Hubtel calls are traced.
+        var everyTag = string.Join(' ', exported.SelectMany(s => s.Tags).Select(t => t.Value));
+        Assert.DoesNotContain(signature, everyTag);
+        Assert.DoesNotContain("233551234567", everyTag);
+        Assert.DoesNotContain(exported, s => s.GetTagItem("url.path")?.ToString() == "/health");
+        Assert.DoesNotContain(exported, s => s.Source.Name.Contains("Npgsql") || s.Source.Name.Contains("EntityFramework"));
+
+        List<LogRecord> records;
+        lock (logs) records = [.. logs];
+        var failure = Assert.Single(records, r => r.FormattedMessage?.Contains("PaymentFailed") == true && r.FormattedMessage.Contains("hubtel.2001"));
+        Assert.Equal(LogLevel.Warning, failure.LogLevel);
+        Assert.DoesNotContain(records, r => r.FormattedMessage?.Contains(signature) == true);
     }
 
     // ---- Payments that don't go through ----
@@ -600,11 +639,11 @@ public sealed class BillPaymentFlowTests
         private HttpClient? _finance;
         public BillPaymentOptions Config => Factory.Services.GetRequiredService<IOptions<BillPaymentOptions>>().Value;
 
-        public static async Task<Rig> CreateAsync(bool docs = false)
+        public static async Task<Rig> CreateAsync(bool docs = false, List<Activity>? spans = null, List<LogRecord>? logs = null)
         {
             var rig = new Rig();
             await rig.Simulator.StartAsync();
-            rig.Factory = new PaymentApiFactory(rig.Simulator, docs);
+            rig.Factory = new PaymentApiFactory(rig.Simulator, docs, spans, logs);
             await rig.Factory.InitializeAsync();
             rig.Client = (await rig.Factory.SignInAsync("0551234567", fullName: "Payment Tester")).Client;
             return rig;

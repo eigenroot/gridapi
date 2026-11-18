@@ -18,6 +18,13 @@ public sealed class Property : Entity
     public required string Address { get; set; }
     public string? GhanaPostGps { get; set; }
 
+    /// <summary>Where the home is, when the device shared it. Jobs are matched on this first.</summary>
+    public double? Latitude { get; set; }
+    public double? Longitude { get; set; }
+
+    /// <summary>The service area the home falls in, worked out from the location or the area name. Null when GRID doesn't serve it yet.</summary>
+    public Guid? ServiceAreaId { get; set; }
+
     /// <summary>Deleting archives, so receipts and bookings that refer to it stay intact.</summary>
     public DateTimeOffset? ArchivedAt { get; set; }
 }

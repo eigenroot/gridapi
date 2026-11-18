@@ -49,6 +49,7 @@ public static class MediaEndpoints
         HttpRequest request,
         CurrentConsumer current,
         GridDbContext db,
+        IMediaStore store,
         IOptions<MediaOptions> options,
         TimeProvider time,
         CancellationToken ct)
@@ -78,7 +79,10 @@ public static class MediaEndpoints
         db.MediaObjects.Add(media);
         await db.SaveChangesAsync(ct);
 
-        // /api/v1 is the API's group prefix. The client PUTs to this absolute URL with its bearer token.
+        // With R2 the phone uploads straight to the bucket; otherwise it PUTs to this API with its bearer token.
+        if (store.DirectUpload(media.StorageKey, contentType, media.DeclaredSizeBytes, media.UploadExpiresAt) is { } direct)
+            return Envelope.Ok(new UploadTicketResponse(media.StorageKey, direct.Url, direct.Headers, media.UploadExpiresAt));
+
         var origin = string.IsNullOrWhiteSpace(o.PublicBaseUrl)
             ? $"{request.Scheme}://{request.Host}{request.PathBase}"
             : o.PublicBaseUrl.TrimEnd('/');
@@ -89,7 +93,7 @@ public static class MediaEndpoints
             media.UploadExpiresAt));
     }
 
-    /// <summary>Raw bytes. Can be repeated until the upload is confirmed.</summary>
+    /// <summary>Raw bytes, when files are kept locally. Can be repeated until the upload is confirmed.</summary>
     private static async Task<EnvelopeResult<MediaResponse>> Upload(
         string storageKey,
         HttpRequest request,
@@ -109,6 +113,8 @@ public static class MediaEndpoints
             throw new ApiException(400, "media.upload_expired", "This upload link has expired. Start the upload again.");
         if (MediaTypes.Normalize(request.ContentType) != media.ContentType)
             throw UnsupportedType();
+        if (options.Value.Provider != MediaProvider.Local)
+            throw new ApiException(400, "media.direct_upload_required", "Send the file to the upload link you were given.");
 
         var limit = Math.Min(media.DeclaredSizeBytes, options.Value.MaxBytes);
         var written = await store.WriteAsync(media.StorageKey, request.Body, limit, ct)
@@ -126,6 +132,7 @@ public static class MediaEndpoints
         CurrentConsumer current,
         GridDbContext db,
         IMediaStore store,
+        IOptions<MediaOptions> options,
         TimeProvider time,
         CancellationToken ct)
     {
@@ -133,27 +140,38 @@ public static class MediaEndpoints
         var media = await FindOwnedAsync(db, consumerId, body.StorageKey, ct);
         if (media.Status == MediaStatus.Confirmed) return Envelope.Ok(MediaResponse.From(media));
 
-        await using var stream = media.Status == MediaStatus.Uploaded ? store.OpenRead(media.StorageKey) : null;
-        if (stream is null) throw NotUploaded();
+        // Ask the store rather than trusting our own record: with R2 the bytes never came through here.
+        var size = await store.SizeAsync(media.StorageKey, ct);
+        if (size is null) throw NotUploaded();
+        var limit = Math.Min(media.DeclaredSizeBytes, options.Value.MaxBytes);
+        if (size > limit)
+        {
+            await store.DeleteAsync(media.StorageKey, ct);
+            throw TooLarge(limit);
+        }
 
         var head = new byte[MediaTypes.SniffLength];
-        var read = await stream.ReadAtLeastAsync(head, head.Length, throwOnEndOfStream: false, ct);
+        int read;
+        await using (var stream = await store.OpenReadAsync(media.StorageKey, ct) ?? throw NotUploaded())
+            read = await stream.ReadAtLeastAsync(head, head.Length, throwOnEndOfStream: false, ct);
         if (!MediaTypes.Matches(media.ContentType, head.AsSpan(0, read)))
             throw new ApiException(400, "media.unsupported_type", "The file isn't the type it says it is.");
 
+        media.SizeBytes = size;
+        media.UploadedAt ??= time.GetUtcNow();
         media.Status = MediaStatus.Confirmed;
         media.ConfirmedAt = time.GetUtcNow();
         await db.SaveChangesAsync(ct);
         return Envelope.Ok(MediaResponse.From(media));
     }
 
-    /// <summary>Owner-only for now; Ops reviewers get access when the review console exists.</summary>
+    /// <summary>Owner-only. Reviewers read through <c>/ops/media</c>.</summary>
     private static async Task<IResult> Download(
         string storageKey, CurrentConsumer current, GridDbContext db, IMediaStore store, CancellationToken ct)
     {
         var consumerId = (await current.LoadAsync(ct)).Id;
         var media = await FindOwnedAsync(db, consumerId, storageKey, ct);
-        var stream = media.Status == MediaStatus.Confirmed ? store.OpenRead(media.StorageKey) : null;
+        var stream = media.Status == MediaStatus.Confirmed ? await store.OpenReadAsync(media.StorageKey, ct) : null;
         if (stream is null) throw NotFound();
         return Results.Stream(stream, media.ContentType);
     }

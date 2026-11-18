@@ -102,8 +102,8 @@ public static class ProviderSetupEndpoints
     }
 
     /// <summary>
-    /// Prices are optional here: the app saves the service before the provider has priced it.
-    /// Readiness reports <c>pricing.required</c> until the chosen mode's price is set.
+    /// Prices are optional and no longer used to charge customers: GRID's package prices decide
+    /// what a booking costs. They are kept for providers' own reference.
     /// </summary>
     private static async Task<EnvelopeResult<OfferingResponse>> CreateOffering(
         OfferingRequest body, CurrentProvider provider, GridDbContext db, CancellationToken ct)
@@ -120,14 +120,20 @@ public static class ProviderSetupEndpoints
         return Envelope.Created(OfferingResponse.From(offering));
     }
 
-    /// <summary>Full replace.</summary>
+    /// <summary>Full replace. After approval, prices and <c>isActive</c> can still change; the service itself cannot.</summary>
     private static async Task<EnvelopeResult<OfferingResponse>> UpdateOffering(
         Guid id, OfferingRequest body, CurrentProvider provider, GridDbContext db, CancellationToken ct)
     {
-        var accountId = (await provider.LoadEditableAsync(ct)).Account.Id;
+        var (_, account, application) = await provider.LoadAsync(ct);
+        var accountId = account.Id;
         var offering = await db.ProviderOfferings.SingleOrDefaultAsync(o => o.Id == id && o.ProviderAccountId == accountId, ct)
                        ?? throw Errors.NotFound("providers.offering_not_found", "That service was not found.");
         var input = await ValidateOfferingAsync(db, body, ct);
+        // An approved provider can pause or resume a service; which service it is
+        // was part of what GRID approved, so that stays fixed. Under review, nothing changes.
+        if (application.IsLocked
+            && (application.Status != ApplicationStatus.Approved || input.ServiceCategoryId != offering.ServiceCategoryId))
+            throw Errors.ProviderLocked();
         if (await db.ProviderOfferings.AnyAsync(o => o.ProviderAccountId == accountId && o.ServiceCategoryId == input.ServiceCategoryId && o.Id != id, ct))
             throw OfferingExists();
 

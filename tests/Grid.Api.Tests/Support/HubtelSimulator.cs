@@ -243,6 +243,8 @@ public sealed class PaymentApiFactory(HubtelSimulator simulator, bool docs = fal
 {
     public const string FinancePhone = "233209990000";
 
+    protected override string PaymentMode => "Hubtel";
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         base.ConfigureWebHost(builder);

@@ -7,9 +7,12 @@ using Grid.Api.Features.BillPayments;
 using Grid.Api.Features.Catalogue;
 using Grid.Api.Features.Consumers;
 using Grid.Api.Features.Kyc;
+using Grid.Api.Features.Marketplace;
 using Grid.Api.Features.Media;
+using Grid.Api.Features.Ops;
 using Grid.Api.Features.Properties;
 using Grid.Api.Features.Providers;
+using Grid.Api.Features.Support;
 using Grid.Api.Features.UtilityAccounts;
 using Grid.Api.Integrations.Hubtel;
 using Grid.Api.Integrations.Sms;
@@ -38,6 +41,9 @@ services.AddOptions<KycOptions>().Bind(config.GetSection(KycOptions.Section)).Va
 services.AddOptions<MediaOptions>().Bind(config.GetSection(MediaOptions.Section)).ValidateOnStart();
 services.AddOptions<PayoutOptions>().Bind(config.GetSection(PayoutOptions.Section)).ValidateOnStart();
 services.AddOptions<BillPaymentOptions>().Bind(config.GetSection(BillPaymentOptions.Section)).ValidateOnStart();
+services.AddOptions<MarketplaceOptions>().Bind(config.GetSection(MarketplaceOptions.Section)).ValidateOnStart();
+services.AddOptions<OpsOptions>().Bind(config.GetSection(OpsOptions.Section));
+services.AddSingleton<IValidateOptions<MarketplaceOptions>, MarketplaceOptionsValidator>();
 services.AddSingleton<IValidateOptions<OtpOptions>, OtpOptionsValidator>();
 services.AddSingleton<IValidateOptions<JwtOptions>, JwtOptionsValidator>();
 services.AddSingleton<IValidateOptions<SmsOptions>, SmsOptionsValidator>();
@@ -48,6 +54,9 @@ services.AddSingleton<IValidateOptions<BillPaymentOptions>, BillPaymentOptionsVa
 
 if (builder.Environment.IsProduction() && config.GetValue<bool>("Otp:DevelopmentMode"))
     throw new InvalidOperationException("Otp:DevelopmentMode must not be enabled in Production.");
+if (builder.Environment.IsProduction()
+    && config.GetValue<Grid.Api.Features.ServicePayments.ServicePaymentMode>("Marketplace:PaymentMode") == Grid.Api.Features.ServicePayments.ServicePaymentMode.Simulated)
+    throw new InvalidOperationException("Marketplace:PaymentMode must not be Simulated in Production.");
 
 // ---- Infrastructure ----
 services.AddSingleton(TimeProvider.System);
@@ -112,7 +121,23 @@ services.AddScoped<CurrentConsumer>();
 // ---- Provider onboarding and media ----
 services.AddScoped<CurrentProvider>();
 services.AddSingleton<PayoutProtector>();
-services.AddSingleton<IMediaStore, LocalMediaStore>();
+if (config.GetValue<MediaProvider>("Media:Provider") == MediaProvider.R2)
+{
+    services.AddHttpClient<R2MediaStore>(c => c.Timeout = TimeSpan.FromSeconds(30)).RemoveAllLoggers();
+    services.AddTransient<IMediaStore>(sp => sp.GetRequiredService<R2MediaStore>());
+}
+else
+{
+    services.AddSingleton<IMediaStore, LocalMediaStore>();
+}
+
+// ---- Marketplace: bookings, offers, jobs, earnings; Marketplace:Enabled opens booking to customers ----
+services.AddScoped<Grid.Api.Features.ServicePayments.ServicePaymentService>();
+services.AddScoped<Dispatcher>();
+services.AddScoped<JobService>();
+services.AddScoped<MarketplaceProcessor>();
+services.AddHostedService<MarketplaceWorker>();
+services.AddScoped<OpsAccess>();
 
 services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer();
 services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
@@ -220,6 +245,11 @@ api.MapProviderApplicationEndpoints();
 api.MapProviderSetupEndpoints();
 api.MapProviderEvidenceEndpoints();
 api.MapPayoutMethodEndpoints();
+api.MapProviderProfileEndpoints();
+api.MapProviderWorkEndpoints();
+api.MapServiceRequestEndpoints();
+api.MapSupportEndpoints();
+api.MapOpsEndpoints();
 api.MapBillPaymentEndpoints();
 
 // Unknown routes get the envelope too.
@@ -231,7 +261,8 @@ if (config.GetValue("Database:MigrateOnStartup", app.Environment.IsDevelopment()
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<GridDbContext>();
     await db.Database.MigrateAsync();
-    if (app.Environment.IsDevelopment()) await DevelopmentSeed.RunAsync(db);
+    if (app.Environment.IsDevelopment())
+        await DevelopmentSeed.RunAsync(db, scope.ServiceProvider.GetRequiredService<PayoutProtector>());
 }
 
 app.Run();

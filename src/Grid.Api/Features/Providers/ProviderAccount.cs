@@ -32,6 +32,17 @@ public sealed class ProviderAccount : Entity
     public DeliveryMode DeliveryMode { get; set; } = DeliveryMode.TravelsToCustomer;
     public string? PremisesAddress { get; set; }
 
+    /// <summary>
+    /// Where the provider sets out from (home or premises), when their phone shared it. Without
+    /// it, distance is measured from the centre of the nearest area they cover.
+    /// </summary>
+    public double? BaseLatitude { get; set; }
+    public double? BaseLongitude { get; set; }
+    public DateTimeOffset? LocationUpdatedAt { get; set; }
+
+    /// <summary>How far from their base they'll take a job outside the areas they listed.</summary>
+    public decimal? TravelRadiusKm { get; set; }
+
     public ProviderVerificationStatus VerificationStatus { get; set; } = ProviderVerificationStatus.Draft;
     public OperatingStatus OperatingStatus { get; set; } = OperatingStatus.Offline;
 }

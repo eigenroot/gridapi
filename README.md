@@ -7,7 +7,9 @@ The backend for GRID Home (consumer) and GRID Pro (provider). Version 1 covers:
 - **Background telco name lookup (KYC).**
 - **Homes and saved utility accounts.**
 - **GRID Pro onboarding**: provider accounts, the application and its readiness and submission, offerings, service areas, availability, portfolio, verification documents, standards, payout methods, and media upload.
-- **The service catalogue**: cleaning and laundry, and the service areas.
+- **The service catalogue**: cleaning and laundry, and the service areas, each with a location.
+- **Bookings and jobs**: customers book, the nearest providers are offered the work, jobs run stage by stage, and earnings and payouts are recorded. See [`docs/marketplace.md`](docs/marketplace.md).
+- **Ops**: application review, dispatch follow-up, payouts and support tickets under `/ops`.
 
 Client calling conventions are in [`docs/api-integration.md`](docs/api-integration.md).
 
@@ -89,7 +91,8 @@ Every key can be set from the environment with `__` for `:`, e.g. `Sms__Provider
 | `Kyc:Hubtel:ApiId`, `ApiKey`, `CollectionAccountNumber` | Hubtel Verification API. **Calls only work from IPs Hubtel has whitelisted** |
 | `ReverseProxy:TrustForwardedHeaders` | `true` behind Caddy, so rate limits see the real client IP |
 | `Database:MigrateOnStartup` | Defaults to on in Development only |
-| `Media:RootPath` | Where uploaded files are stored (`App_Data/media` by default; mount a volume in production) |
+| `Media:Provider` | `R2` (Cloudflare R2, for production) or `Local`. R2 keys and the marketplace and Ops settings are in [docs/marketplace.md](docs/marketplace.md#configuration) |
+| `Media:RootPath` | Local only: where uploaded files are stored (`App_Data/media` by default) |
 | `Media:MaxBytes`, `Media:TicketMinutes` | Upload limit (25 MB) and how long an upload link stays valid (15 min) |
 | `Media:PublicBaseUrl` | Optional origin for upload URLs. Without it, the request's scheme and host are used |
 | `OTEL_EXPORTER_OTLP_*` | Sends traces, metrics and logs to Grafana Cloud when set; see [docs/observability.md](docs/observability.md). |
@@ -121,7 +124,7 @@ Every key can be set from the environment with `__` for `:`, e.g. `Sms__Provider
   - While an application is `Submitted`, `UnderReview` or `Approved`, the account details, experience, offerings and verification documents are locked (`409 providers.locked`).
 - **Readiness** is computed by the server (`ProviderReadiness`). The submit flow in GRID Pro sends the offering before its price exists, so a missing price is a readiness item rather than a validation error. GRID Pro collects a selfie rather than a separate profile photo, and either one satisfies the profile-photo requirement.
 - **Media.**
-  - Bytes go to `IMediaStore`, which is a host directory in v1.
+  - Bytes go to `IMediaStore`: a private Cloudflare R2 bucket in production, where phones upload directly through a presigned link, or a host directory in development.
   - Keys are flat (`{32 hex}.{ext}`).
   - Confirmation checks the file's magic bytes against the declared type.
   - Every read checks ownership. The key locates a file; it does not grant access to it.
@@ -155,9 +158,10 @@ go-live checklist. It is off by default.
 
 ## Not built yet
 
-- **Ops review of provider applications.** Nothing moves an application past `Submitted` yet, and media reads are owner-only until reviewers exist.
-- **Going online** (`PUT /provider-accounts/me/operating-status`, `providers.not_job_ready`).
+- **Collecting the customer's payment for a service.** Jobs, earnings and payouts are recorded; no money moves.
+- **Reviews and ratings**, disputes, and rescheduling.
+- **Push notifications.** Clients poll.
 - **Virus scanning and cleanup of abandoned uploads.**
-- **Card payments**, and paying from a number other than the signed-in one.
-- **SMS delivery-receipt webhooks.** Provider message ids are kept on `otp_challenges` so they can be added.
-- **Ops endpoints**, including a KYC read.
+- **Card payments**, and paying bills from a number other than the signed-in one.
+- **SMS delivery-receipt webhooks.**
+- **An Ops console.** The `/ops` endpoints are driven with curl.

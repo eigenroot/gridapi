@@ -149,7 +149,7 @@ public static class ProviderEvidenceEndpoints
             throw Errors.Validation([new FieldError("documentType", "Say which document this is.")]);
 
         var (consumer, account, _) = await provider.LoadEditableAsync(ct);
-        var purposes = type is VerificationDocumentType.ProfessionalCertificate or VerificationDocumentType.BusinessRegistration
+        var purposes = VerificationDocument.IsCertificate(type)
             ? CertificatePurposes
             : IdentityPurposes;
         var media = await MediaEndpoints.FindAttachableAsync(db, consumer.Id, body.StorageKey, purposes, ct);

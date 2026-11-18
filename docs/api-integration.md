@@ -153,26 +153,32 @@ Three steps, and the middle one is easy to miss:
 ```
 POST /media/upload-requests  { purpose, fileName, contentType, sizeBytes }
      → { storageKey, uploadUrl, headers, expiresAt }
-PUT  <uploadUrl>             raw bytes, Content-Type set, Authorization required
-                             (uploadUrl is absolute: …/api/v1/media/uploads/{storageKey})
+PUT  <uploadUrl>             raw bytes, with the Content-Type from `headers`
 POST /media/uploads/confirm  { storageKey }   → checks the bytes match the declared type
 GET  /api/v1/media/{key}     authenticated download
 ```
 
+- **Where `uploadUrl` points depends on the server.**
+  - In production files live in Cloudflare R2, and the link goes **straight to the bucket**. It is
+    signed for the declared content type and exact size. Send no `Authorization` header: storage
+    rejects a request that carries both a signature and a bearer token.
+  - In development the link is the API's own `…/api/v1/media/uploads/{storageKey}`, which **needs**
+    the bearer token.
+  - A client decides by host: send the token only when the link's host is the API's.
 - **Purpose** is `portfolio`, `certificates`, `identity` or `profilePhoto`, in any case. It decides what the upload can later be attached to:
   - portfolio items take `portfolio`;
   - Ghana Card, selfie and profile-photo documents take `identity` or `profilePhoto`;
   - certificates and business registration take `certificates`.
-- **The upload link** lasts 15 minutes (`media.upload_expired`). The PUT can be repeated until the upload is confirmed.
+- **The upload link** lasts 15 minutes. The PUT can be repeated until the upload is confirmed.
 - **Each confirmed upload attaches once** (`media.already_attached`).
 
 Allowed types: `image/jpeg`, `image/png`, `image/webp`, `image/heic`, `application/pdf`,
-`video/mp4`. Maximum 25 MB, enforced on the bytes actually streamed. The streamed size is also capped at the declared `sizeBytes`.
+`video/mp4`. Maximum 25 MB. `sizeBytes` must be the file's real size.
 
-Serving is **authenticated** — these objects include identity documents, so the unguessable key is
-a locator, not an access grant. Clients rendering a stored image must send the bearer token, and
-should build the URL from their own configured base URL rather than trusting `publicUrl`, which is
-generated from server-side configuration.
+Serving is **authenticated** and always goes through the API — these objects include identity
+documents, so the key is a locator, not an access grant, and the bucket has no public access.
+Clients rendering a stored image must send the bearer token and build the URL from their own
+configured base URL.
 
 ## Provider onboarding → endpoints
 
@@ -181,20 +187,23 @@ application, and from then on `user.providerAccountId` is set. There are no role
 `GET /provider-accounts/me` returns **404 `providers.account_not_found`** until the account exists.
 
 The catalogue reads `GET /service-categories` and `GET /service-areas` need no token. Categories are
-hierarchical: offerings use a top-level id (`cleaning`, `laundry`), and the children are sub-services.
+hierarchical: offerings use a top-level id (`cleaning`, `laundry`, `ac-servicing`,
+`pest-control`), and the children are skills. Each category carries `bookingMode`, `section` and
+`isLaunched`; offer only launched ones. GRID sets prices, so GRID Pro reads
+`GET /service-catalogue` for the packages and `feePercent` to show what a provider earns.
 
 | Step | Call | Notes |
 |---|---|---|
 | Provider type | `POST /provider-accounts` | `accountType` `Individual`/`Business`, `displayName` required |
 | Details | `PUT /provider-accounts/me` | **Full replace** — resend every field. Carries `deliveryMode` (`TravelsToCustomer`/`FixedPremises`/`Both`) and `premisesAddress` |
-| Services | `POST`/`PUT /provider-offerings` | `serviceCategoryId` from the catalogue |
+| Services | `POST`/`PUT /provider-offerings` | One per chosen service, `serviceCategoryId` from the catalogue; `isActive: false` to drop one. No prices |
 | Experience | `PUT /provider-applications/me/experience` | |
 | Service area | `POST /provider-service-areas` | One call per area; `GET`/`DELETE` to reconcile |
 | Availability | `PUT /provider-availability/rules` | **Full replace** of the weekly pattern |
-| Pricing | same offering as Services | `InspectionThenQuote`+`inspectionFee`, `PerUnit`+`unitPrice`, `StartingFrom`+`startingPrice` |
+| What you earn | — | Read-only: package `price` × (100 − `feePercent`)% |
 | Payout | `POST /payout-methods` | `makeDefault: true`; only `maskedAccountNumber` is ever returned |
 | Portfolio | upload → `POST /provider-portfolio` | |
-| Identity | upload → `POST /provider-verification-documents` | `GhanaCard`, `GhanaCardBack`, `Selfie`, `ProfilePhoto`, … |
+| Identity | upload → `POST /provider-verification-documents` | `GhanaCard`, `GhanaCardBack`, `Selfie`, `ProfilePhoto`; `EpaPestControlLicence` for pest control, `EnergyCommissionCertificate` for electrical |
 | Standards | `POST /provider-standards/current/accept` | |
 | Review | `GET /provider-applications/me/readiness` | |
 | Submit | `POST /provider-applications/me/submit` | Empty body |
@@ -205,14 +214,15 @@ hierarchical: offerings use a top-level id (`cleaning`, `laundry`), and the chil
 Application readiness needs:
 
 - basic information;
-- at least one offering, priced for its pricing mode;
+- at least one active offering;
+- the licence each offered service needs (`licence.epa_required`, `licence.energy_commission_required`);
 - at least one service area;
 - at least one available day;
 - both sides of the Ghana Card;
 - a profile photo (a `Selfie` counts);
 - acceptance of the current standards.
 
-Prices are optional when an offering is saved, and a missing one shows as `pricing.required`.
+Offering price fields are still accepted but ignored: every job is priced from GRID's packages.
 Submitting while anything is missing returns **422 `providers.application_incomplete`**, with
 `detail.missingRequirements`. Repeating a submit that already went through returns the submitted
 application.
@@ -220,8 +230,9 @@ application.
 Re-posting a payout method with the same type and number updates it instead of adding a duplicate.
 Adding a service area that is already listed returns the existing row.
 
-*Going online* additionally needs a default payout method, and fails with `providers.not_job_ready`.
-It is not built yet.
+After approval the provider can still pause or resume a service
+(`PUT /provider-offerings/{id}`, same service only), their areas, their hours, and their
+description (`PUT /provider-accounts/me/profile { description }`).
 
 **Verification-critical fields lock** once the application is `Submitted`, `UnderReview` or
 `Approved` — edits then return `409 providers.locked`. They unlock again on
@@ -261,10 +272,17 @@ There is no push channel, so clients poll for the decision.
 | `catalogue.category_not_found` / `catalogue.area_not_found` | Unknown id, or a sub-service where a top-level service is needed |
 | `providers.not_job_ready` | Going online before payout/areas/availability exist |
 | `providers.premises_address_required` | Fixed premises chosen without an address |
-| `jobs.offer_already_accepted` | Another provider took the offer first |
+| `jobs.offer_already_accepted` / `jobs.offer_expired` | Another provider took it first / it ran out or was declined |
+| `services.disabled` | Booking is switched off (**503**) |
+| `services.area_not_served` | The home is outside every service area (**422**) |
+| `services.request_not_cancellable` | The provider has already set off |
+| `services.not_launched` | That service can't be booked yet (**422**) |
+| `services.payment_not_retryable` | `/pay` on a booking that isn't `PaymentFailed` (**409**) |
+| `catalogue.package_not_found` | A package was retired; reload the catalogue (**404**) |
+| `reviews.not_completed`, `reviews.already_reviewed` | Rating too early, or twice (**409**) |
+| `licence.epa_required`, `licence.energy_commission_required` | Readiness: a licence is missing for an offered service |
+| `ops.forbidden` | Not one of `Ops:Operators` |
 | `jobs.invalid_transition` | Stage move not allowed from here |
-| `quotes.customer_approval_required` | Quote-gated stage attempted before approval |
-| `quotes.self_approval_forbidden` | A provider cannot approve their own quote |
 | `media.unsupported_type` / `media.too_large` / `media.not_uploaded` | Upload rejected |
 | `media.upload_expired` / `media.already_confirmed` / `media.already_attached` / `media.wrong_purpose` | Upload link or attachment misuse |
 | `payments.disabled` / `bills.product_paused` | Bill payments, or this product, are switched off (**503**) |
@@ -277,16 +295,81 @@ There is no push channel, so clients poll for the decision.
 | `payments.provider_unavailable` | Hubtel didn't answer; try again shortly |
 | `payments.rate_limited` | Too many orders or lookups in a minute |
 
-## Jobs
+## The provider's working day
 
-Job stages are server-controlled and strictly linear — there is no generic status update, only
-intent commands (`start-journey`, `arrive`, `start-inspection`, `start-work`, `complete-work`,
-`confirm-completion`, `cancel`, …). **Gate action buttons on `JobResponse.allowedNextStages`**
-rather than assuming a sequence.
+```
+GET  /provider-accounts/me/summary            name, phone, services, areas, payout method, completedJobs,
+                                              rating, reviews, canGoOnline, missingToGoOnline[]
+PUT  /provider-accounts/me/operating-status   { operatingStatus: Online|Offline } → summary
+PUT  /provider-accounts/me/location           { latitude?, longitude?, travelRadiusKm? } → summary
 
-Two practical constraints today: only the **Repair** workflow is fully drivable from a client —
-the other four have scheduling stages no endpoint can enter — and `confirm-completion` rejects the
-provider, since only the customer or Ops may close a job.
+GET  /job-offers?status=Pending               open requests, soonest to expire first
+GET  /job-offers/{id}
+POST /job-offers/{id}/accept                  → the job
+POST /job-offers/{id}/decline                 { reason? }
 
-Offers carry no customer PII before acceptance: `generalArea` only, and `distanceKm` is always
-null because there is no geo matching yet.
+GET  /jobs?status=active|completed            GET /jobs/{id}
+POST /jobs/{id}/{nextCommand}                 → the job
+POST /jobs/{id}/cancel                        { reason }   only before setting off
+
+GET  /provider-earnings/summary               availableAmount, pendingAmount, paidAmount, last7Days, last30Days
+GET  /provider-earnings                       GET /provider-payouts
+POST /support-tickets                         { category?, subject, details, jobId? }   GET /support-tickets
+```
+
+- **Going online** needs an approved application, an active service, an area, a working day
+  and a default payout method. Otherwise **409 `providers.not_job_ready`** with
+  `detail.missingRequirements`. The same list is in the summary, so the app can say why up front.
+- **Offers carry no customer details**: `generalArea`, `distanceKm`, the schedule, the `title` and
+  `scope` of what was booked ("3 × General service"), and `price`, `fee` and `earnings`. The name, phone and address arrive on the job. `customerPhone` is null once
+  the job is no longer live.
+- **Several providers hold the same request.** The first to accept gets the job; the rest get
+  **409 `jobs.offer_already_accepted`**. An offer that ran out or was declined answers
+  `jobs.offer_expired`.
+- **Jobs move one step at a time.** `nextCommand` on the job is the only step GRID will take:
+  `start-journey → arrive → start-work → complete-work` for cleaning, AC servicing and pest
+  control, and
+  `confirm-pickup → start-processing → mark-ready → start-delivery → confirm-delivery` for laundry.
+  Anything else is **409 `jobs.invalid_transition`**. Repeating the step just taken is harmless.
+- **`stage`** is camelCase: `accepted`, `onTheWay`, `arrived`, `inProgress`, `pickedUp`,
+  `processing`, `readyForDelivery`, `outForDelivery`, `awaitingConfirmation`, `completed`,
+  `cancelled`.
+- **Money.** The last step creates a `Pending` earning. It becomes `Available` when the customer
+  confirms (or 24 hours later), and `Paid` when GRID records a payout.
+- There is no push channel. GRID Pro re-reads offers every 30 seconds while it is open.
+
+## Booking a service (GRID Home)
+
+```
+GET  /service-catalogue                               sections → services → packages at GRID's prices, feePercent
+GET  /service-areas/locate?latitude=&longitude=       { served, area, distanceKm }
+GET  /service-requests/availability?serviceCategoryId=&propertyId=&date=
+                                                      { served, area, providersNearby, slots[{ startsAt, available, providers }] }
+POST /service-requests       Idempotency-Key: <uuid>
+                             { lines: [{ packageId, quantity }], propertyId, scheduledAt, urgency?, items?, notes?,
+                               channel?, preferredProviderAccountId? }
+GET  /service-requests       GET /service-requests/{id}
+POST /service-requests/{id}/pay                       { channel? }   a new MoMo prompt after PaymentFailed
+POST /service-requests/{id}/cancel                    { reason? }    until the provider sets off; refunds in full
+POST /service-requests/{id}/confirm-completion        releases the provider's earning
+POST /service-requests/{id}/review                    { rating 1–5, comment? }   once, after completion
+```
+
+- **The server prices the booking.** Send package ids and quantities only; `total` and `lines`
+  come back. One service per booking, and one size per group of alternatives (e.g. one bedroom
+  count of Standard clean).
+- **Paying.** Creating a booking sends the MoMo prompt to the signed-in phone (or `channel`) and
+  returns `status: AwaitingPayment` with `payment.nextAction: ApproveOnPhone`. Poll
+  `GET /service-requests/{id}` until it is `Searching` (paid) or `PaymentFailed`. A retry with the
+  same `Idempotency-Key` returns the same booking and never sends a second prompt.
+- **`payment.status`**: `AwaitingApproval`, `Paid`, `Failed`, `Refunding`, `Refunded`,
+  `RefundFailed`.
+- **`status`**: `AwaitingPayment`, `PaymentFailed`, `Searching`, `Assigned`, `InProgress`,
+  `Completed`, `Cancelled`, `Unfilled`. `canCancel` says whether cancel is allowed now;
+  `jobStage` follows the provider; `provider` (name, phone, completed jobs, rating) appears once
+  someone accepts; `review` once rated.
+- **Book again** by sending `preferredProviderAccountId` from an earlier booking's `provider.id`.
+
+`/properties` accepts optional `latitude` and `longitude` and returns the `serviceAreaId` the home
+falls in. How requests reach providers, and how payments and refunds work, is in
+[marketplace.md](marketplace.md).

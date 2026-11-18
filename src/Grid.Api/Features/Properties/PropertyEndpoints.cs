@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using Grid.Api.Common;
 using Grid.Api.Data;
+using Grid.Api.Features.Catalogue;
 using Grid.Api.Features.Consumers;
 using Microsoft.EntityFrameworkCore;
 
@@ -12,7 +13,9 @@ public sealed record PropertyRequest(
     string? Area,
     string? City,
     string? Address,
-    string? GhanaPostGps);
+    string? GhanaPostGps,
+    double? Latitude = null,
+    double? Longitude = null);
 
 public sealed record PropertyResponse(
     Guid Id,
@@ -22,12 +25,15 @@ public sealed record PropertyResponse(
     string City,
     string Address,
     string? GhanaPostGps,
+    double? Latitude,
+    double? Longitude,
+    Guid? ServiceAreaId,
     bool IsPrimary,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt)
 {
     public static PropertyResponse From(Property p, Guid? defaultPropertyId) =>
-        new(p.Id, p.Nickname, p.Kind, p.Area, p.City, p.Address, p.GhanaPostGps,
+        new(p.Id, p.Nickname, p.Kind, p.Area, p.City, p.Address, p.GhanaPostGps, p.Latitude, p.Longitude, p.ServiceAreaId,
             p.Id == defaultPropertyId, p.CreatedAt, p.UpdatedAt);
 }
 
@@ -79,7 +85,10 @@ public static partial class PropertyEndpoints
             City = input.City,
             Address = input.Address,
             GhanaPostGps = input.GhanaPostGps,
+            Latitude = input.Latitude,
+            Longitude = input.Longitude,
         };
+        property.ServiceAreaId = await ResolveAreaAsync(db, property, ct);
         db.Properties.Add(property);
         await db.SaveChangesAsync(ct);
 
@@ -106,6 +115,9 @@ public static partial class PropertyEndpoints
         property.City = input.City;
         property.Address = input.Address;
         property.GhanaPostGps = input.GhanaPostGps;
+        property.Latitude = input.Latitude;
+        property.Longitude = input.Longitude;
+        property.ServiceAreaId = await ResolveAreaAsync(db, property, ct);
         await db.SaveChangesAsync(ct);
 
         return Envelope.Ok(PropertyResponse.From(property, consumer.DefaultPropertyId));
@@ -147,7 +159,18 @@ public static partial class PropertyEndpoints
             p => p.Id == id && p.OwnerConsumerId == consumerId && p.ArchivedAt == null, ct)
         ?? throw Errors.NotFound("properties.not_found", "That home was not found.");
 
-    private sealed record ValidInput(string Nickname, PropertyKind Kind, string Area, string City, string Address, string? GhanaPostGps);
+    /// <summary>The location decides the area when there is one; otherwise the area name the person chose does.</summary>
+    internal static async Task<Guid?> ResolveAreaAsync(GridDbContext db, Property property, CancellationToken ct)
+    {
+        var areas = await db.ServiceAreas.Where(a => a.IsActive).ToListAsync(ct);
+        if (GeoPoint.From(property.Latitude, property.Longitude) is { } point)
+            return ServiceAreas.Locate(areas, point)?.Area.Id;
+        return ServiceAreas.ByName(areas, property.Area)?.Id;
+    }
+
+    private sealed record ValidInput(
+        string Nickname, PropertyKind Kind, string Area, string City, string Address, string? GhanaPostGps,
+        double? Latitude, double? Longitude);
 
     private static ValidInput Validate(PropertyRequest body)
     {
@@ -159,8 +182,12 @@ public static partial class PropertyEndpoints
         var gps = v.Optional("ghanaPostGps", body.GhanaPostGps, 16, "GhanaPost GPS address")?.ToUpperInvariant();
         if (gps is not null && !GhanaPostGpsPattern().IsMatch(gps))
             v.Add("ghanaPostGps", "Enter a GhanaPost GPS address like GA-123-4567.");
+        if (body.Latitude is null != body.Longitude is null)
+            v.Add("latitude", "Send both latitude and longitude, or neither.");
+        else if (body.Latitude is { } lat && body.Longitude is { } lng && !Geo.IsInGhana(lat, lng))
+            v.Add("latitude", "That location isn't in Ghana.");
         v.ThrowIfInvalid();
-        return new ValidInput(nickname, body.Kind ?? PropertyKind.House, area, city, address, gps);
+        return new ValidInput(nickname, body.Kind ?? PropertyKind.House, area, city, address, gps, body.Latitude, body.Longitude);
     }
 
     [GeneratedRegex(@"^[A-Z]{2}-\d{3,4}-\d{3,4}$")]

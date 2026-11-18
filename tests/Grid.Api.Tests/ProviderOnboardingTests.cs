@@ -15,12 +15,15 @@ public class ProviderOnboardingTests(ApiFactory api) : IClassFixture<ApiFactory>
         readiness.GetProperty("missingRequirements").EnumerateArray().Select(r => r.GetProperty("code").GetString()).ToHashSet();
 
     [Fact]
-    public async Task Catalogue_is_public_and_holds_cleaning_and_laundry()
+    public async Task Catalogue_is_public_and_holds_the_six_services()
     {
         var anonymous = api.Client("pro");
         var categories = await Onboarding.CatalogueAsync(anonymous, "service-categories");
         var parents = categories.EnumerateArray().Where(c => c.GetProperty("parentCategoryId").ValueKind == JsonValueKind.Null).ToList();
-        Assert.Equal(["cleaning", "laundry"], parents.Select(c => c.GetProperty("slug").GetString()));
+        Assert.Equal(["cleaning", "laundry", "ac-servicing", "pest-control", "plumbing", "electrical"],
+            parents.Select(c => c.GetProperty("slug").GetString()));
+        Assert.Equal([true, true, true, true, false, false], parents.Select(c => c.GetProperty("isLaunched").GetBoolean()));
+        Assert.Equal("CallOutThenQuote", parents[4].GetProperty("bookingMode").GetString());
 
         var cleaningId = parents[0].GetProperty("id").GetString();
         var children = categories.EnumerateArray().Where(c => c.GetProperty("parentCategoryId").GetString() == cleaningId).ToList();
@@ -50,10 +53,10 @@ public class ProviderOnboardingTests(ApiFactory api) : IClassFixture<ApiFactory>
 
         await Json.ExpectSuccessAsync(await me.Client.PutAsJsonAsync("/api/v1/provider-accounts/me", Onboarding.Details()));
 
-        // The services step saves the offering before it has a price; that is accepted, and readiness says so.
+        // The services step saves the offering without a price: GRID sets what customers pay.
         var cleaning = await Onboarding.CategoryIdAsync(me.Client, "cleaning");
         var offering = await Json.ExpectSuccessAsync(await me.Client.PostAsJsonAsync("/api/v1/provider-offerings", Onboarding.Offering(cleaning, null)));
-        Assert.Contains("pricing.required", MissingCodes(await ReadinessAsync(me.Client)));
+        Assert.DoesNotContain("offering.required", MissingCodes(await ReadinessAsync(me.Client)));
 
         // A resumed session finds the offering by category and updates it.
         var offerings = await Json.ExpectSuccessAsync(await me.Client.GetAsync("/api/v1/provider-offerings"));
@@ -99,7 +102,7 @@ public class ProviderOnboardingTests(ApiFactory api) : IClassFixture<ApiFactory>
         // Only the standards remain, and the selfie counts as the profile photo.
         var readiness = await ReadinessAsync(me.Client);
         Assert.Equal(new HashSet<string?> { "standards.required" }, MissingCodes(readiness));
-        Assert.Equal(88, readiness.GetProperty("completionPercentage").GetInt32());
+        Assert.Equal(87, readiness.GetProperty("completionPercentage").GetInt32());
 
         await Json.ExpectSuccessAsync(await me.Client.PostAsync("/api/v1/provider-standards/current/accept", null));
         readiness = await ReadinessAsync(me.Client);
@@ -161,7 +164,7 @@ public class ProviderOnboardingTests(ApiFactory api) : IClassFixture<ApiFactory>
 
         var readiness = await ReadinessAsync(me.Client);
         Assert.False(readiness.GetProperty("isReady").GetBoolean());
-        Assert.Equal(11, readiness.GetProperty("completionPercentage").GetInt32()); // only details (name, travels) is met
+        Assert.Equal(12, readiness.GetProperty("completionPercentage").GetInt32()); // only details (name, travels) is met
 
         var error = await Json.ExpectErrorAsync(await me.Client.PostAsync("/api/v1/provider-applications/me/submit", null),
             422, "providers.application_incomplete");
@@ -169,7 +172,7 @@ public class ProviderOnboardingTests(ApiFactory api) : IClassFixture<ApiFactory>
             .Select(r => r.GetProperty("code").GetString()).ToHashSet();
         Assert.Equal(new HashSet<string?>
         {
-            "offering.required", "pricing.required", "service_area.required", "availability.required",
+            "offering.required", "service_area.required", "availability.required",
             "identity.ghana_card_required", "identity.ghana_card_back_required", "identity.profile_photo_required",
             "standards.required",
         }, codes);

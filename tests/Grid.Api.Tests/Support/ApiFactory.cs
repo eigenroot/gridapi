@@ -27,6 +27,12 @@ public partial class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     /// <summary>Small enough that tests can exceed it cheaply.</summary>
     public const long MediaMaxBytes = 64 * 1024;
 
+    /// <summary>The one phone number allowed to use <c>/ops</c>.</summary>
+    public const string OpsPhone = "0209000001";
+
+    /// <summary>Service bookings are paid at once unless a test brings Hubtel in.</summary>
+    protected virtual string PaymentMode => "Simulated";
+
     public FakeSmsSender Sms { get; } = new();
     public FakeIdentityLookup Kyc { get; } = new();
     public FakeTime Time { get; } = new();
@@ -50,6 +56,10 @@ public partial class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         builder.UseSetting("Kyc:RunWorker", "false");
         builder.UseSetting("Media:RootPath", _mediaRoot);
         builder.UseSetting("Media:MaxBytes", MediaMaxBytes.ToString());
+        builder.UseSetting("Marketplace:Enabled", "true");
+        builder.UseSetting("Marketplace:RunWorker", "false");
+        builder.UseSetting("Marketplace:PaymentMode", PaymentMode);
+        builder.UseSetting("Ops:Operators:0", OpsPhone);
         builder.UseSetting("Payouts:EncryptionKey", Convert.ToBase64String(new byte[32].Select((_, i) => (byte)i).ToArray()));
 
         builder.ConfigureTestServices(services =>
@@ -96,6 +106,13 @@ public partial class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         return await scope.ServiceProvider.GetRequiredService<KycProcessor>().ProcessDueAsync(CancellationToken.None);
     }
 
+    /// <summary>One pass of the marketplace worker: lapse offers, send due rounds, auto-confirm jobs.</summary>
+    public async Task<int> RunMarketplaceAsync()
+    {
+        using var scope = Services.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<Features.Marketplace.MarketplaceProcessor>().RunAsync(CancellationToken.None);
+    }
+
     /// <summary>Requests a code, reads it from the fake SMS, verifies it, and returns the session data.</summary>
     public async Task<SignedIn> SignInAsync(string phone, string app = "consumer", string? fullName = null)
     {
@@ -110,6 +127,25 @@ public partial class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         client.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", data.GetProperty("accessToken").GetString());
         return new SignedIn(client, data);
+    }
+
+    /// <summary>
+    /// A fresh session for someone who has signed in before, without spending an OTP. Tests that
+    /// move the clock use it to replace an expired access token.
+    /// </summary>
+    public async Task<HttpClient> ResumeAsync(string phone, string app = "consumer")
+    {
+        var normalized = Common.PhoneNumbers.Normalize(phone);
+        using var scope = Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<GridDbContext>();
+        var consumer = await db.Consumers.SingleOrDefaultAsync(c => c.PhoneNumber == normalized);
+        if (consumer is null) return (await SignInAsync(phone, app)).Client;
+
+        var tokens = await scope.ServiceProvider.GetRequiredService<Features.Auth.TokenService>()
+            .IssueAsync(consumer, new Features.Auth.ClientInfo(Common.AppKind.Unknown, null, null), CancellationToken.None);
+        var client = Client(app);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
+        return client;
     }
 
     public sealed record SignedIn(HttpClient Client, JsonElement Session)

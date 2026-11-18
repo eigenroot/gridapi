@@ -10,7 +10,7 @@ using Microsoft.Extensions.Options;
 
 namespace Grid.Api.Features.BillPayments;
 
-public enum CallbackKind { Payment, Bill, Refund, Transfer }
+public enum CallbackKind { Payment, Bill, Refund, Transfer, ServicePayment, ServiceRefund }
 
 /// <summary>
 /// Per-row callback URLs. The last segment is an HMAC of the kind and row id, so the URL alone
@@ -35,7 +35,7 @@ public sealed class CallbackUrls(IOptions<BillPaymentOptions> options)
 /// <see cref="OrderTransitions"/>. Repeats are harmless: a settled row ignores the same news.
 /// </summary>
 public sealed class HubtelCallbackHandler(GridDbContext db, OrderTransitions transitions, CallbackUrls urls,
-    IOptions<BillPaymentOptions> options, ILogger<HubtelCallbackHandler> logger)
+    ServicePayments.ServicePaymentService servicePayments, IOptions<BillPaymentOptions> options, ILogger<HubtelCallbackHandler> logger)
 {
     public async Task HandleAsync(CallbackKind kind, Guid id, string signature, IPAddress? source, JsonElement body, CancellationToken ct)
     {
@@ -74,6 +74,19 @@ public sealed class HubtelCallbackHandler(GridDbContext db, OrderTransitions tra
                 RequireMatch(result.OrderId, order.HubtelOrderId);
                 transitions.RefundOutcome(order, refund, result);
                 orderForEvent = order.Id;
+                break;
+            }
+            case CallbackKind.ServicePayment:
+            {
+                var payment = await servicePayments.LockAsync(id, ct) ?? throw NotFound();
+                RequireMatch(reference, payment.ClientReference);
+                await servicePayments.OutcomeAsync(payment, result, ct);
+                break;
+            }
+            case CallbackKind.ServiceRefund:
+            {
+                var payment = await servicePayments.LockAsync(id, ct) ?? throw NotFound();
+                servicePayments.RefundOutcome(payment, result);
                 break;
             }
             case CallbackKind.Transfer:

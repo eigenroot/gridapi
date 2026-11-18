@@ -5,6 +5,12 @@ namespace Grid.Api.Features.Providers;
 public enum VerificationDocumentType
 {
     GhanaCard, GhanaCardBack, Selfie, ProfilePhoto, ProfessionalCertificate, BusinessRegistration,
+
+    /// <summary>The EPA licence pest control operators must hold.</summary>
+    EpaPestControlLicence,
+
+    /// <summary>The Energy Commission's electrical wiring certificate.</summary>
+    EnergyCommissionCertificate,
 }
 
 public enum ReviewStatus { Pending, Approved, Rejected }
@@ -33,6 +39,21 @@ public sealed class VerificationDocument : Entity
     /// <summary>Types a provider holds at most one current copy of; certificates can be many.</summary>
     public static bool IsSingleInstance(VerificationDocumentType type) =>
         type is not VerificationDocumentType.ProfessionalCertificate;
+
+    /// <summary>Papers rather than photos of the person: uploaded as certificates.</summary>
+    public static bool IsCertificate(VerificationDocumentType type) =>
+        type is VerificationDocumentType.ProfessionalCertificate or VerificationDocumentType.BusinessRegistration
+            or VerificationDocumentType.EpaPestControlLicence or VerificationDocumentType.EnergyCommissionCertificate;
+
+    /// <summary>The licence a service needs before GRID can approve a provider for it, by category slug.</summary>
+    public static readonly IReadOnlyDictionary<string, (VerificationDocumentType Type, string Code, string Message)> RequiredFor =
+        new Dictionary<string, (VerificationDocumentType, string, string)>
+        {
+            ["pest-control"] = (VerificationDocumentType.EpaPestControlLicence, "licence.epa_required",
+                "Add your EPA pest control licence."),
+            ["electrical"] = (VerificationDocumentType.EnergyCommissionCertificate, "licence.energy_commission_required",
+                "Add your Energy Commission wiring certificate."),
+        };
 }
 
 /// <summary>An example of past work. Publishable later, so it is kept apart from verification documents.</summary>

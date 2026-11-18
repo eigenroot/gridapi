@@ -21,6 +21,8 @@ public static class ProviderReadiness
     {
         var id = account.Id;
         var offerings = await db.ProviderOfferings.Where(o => o.ProviderAccountId == id && o.IsActive).ToListAsync(ct);
+        var offeredIds = offerings.Select(o => o.ServiceCategoryId).ToList();
+        var offeredSlugs = await db.ServiceCategories.Where(c => offeredIds.Contains(c.Id)).Select(c => c.Slug).ToListAsync(ct);
         var hasArea = await db.ProviderServiceAreas.AnyAsync(a => a.ProviderAccountId == id, ct);
         var hasAvailability = await db.ProviderAvailabilityRules.AnyAsync(r => r.ProviderAccountId == id && r.IsAvailable, ct);
         var documents = await db.VerificationDocuments
@@ -37,7 +39,6 @@ public static class ProviderReadiness
              && (account.DeliveryMode == DeliveryMode.TravelsToCustomer || !string.IsNullOrWhiteSpace(account.PremisesAddress)),
                 "details.required", "Add your name and how you deliver your service."),
             (offerings.Count > 0, "offering.required", "Choose the service you offer."),
-            (offerings.Count > 0 && offerings.All(o => o.HasRequiredPrice), "pricing.required", "Set your price."),
             (hasArea, "service_area.required", "Choose at least one area you work in."),
             (hasAvailability, "availability.required", "Choose the days you're available."),
             (documents.Contains(VerificationDocumentType.GhanaCard),
@@ -49,8 +50,15 @@ public static class ProviderReadiness
             (acceptedStandards, "standards.required", "Accept the GRID professional standards."),
         ];
 
-        var missing = checks.Where(c => !c.Met).Select(c => new MissingRequirement(c.Code, c.Message)).ToList();
-        var percentage = (checks.Length - missing.Count) * 100 / checks.Length;
+        // Licensed trades need their licence on file before GRID can approve them.
+        var licences = offeredSlugs
+            .Where(VerificationDocument.RequiredFor.ContainsKey)
+            .Select(slug => VerificationDocument.RequiredFor[slug])
+            .Select(r => (Met: documents.Contains(r.Type), r.Code, r.Message));
+        var all = checks.Concat(licences).ToArray();
+
+        var missing = all.Where(c => !c.Met).Select(c => new MissingRequirement(c.Code, c.Message)).ToList();
+        var percentage = (all.Length - missing.Count) * 100 / all.Length;
         return new ReadinessResponse(missing.Count == 0, percentage, missing);
     }
 }

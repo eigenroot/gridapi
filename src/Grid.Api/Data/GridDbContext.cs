@@ -20,6 +20,7 @@ public sealed partial class GridDbContext(DbContextOptions<GridDbContext> option
     public DbSet<UtilityAccount> UtilityAccounts => Set<UtilityAccount>();
     public DbSet<ServiceCategory> ServiceCategories => Set<ServiceCategory>();
     public DbSet<ServiceArea> ServiceAreas => Set<ServiceArea>();
+    public DbSet<ServicePackage> ServicePackages => Set<ServicePackage>();
     public DbSet<MediaObject> MediaObjects => Set<MediaObject>();
     public DbSet<ProviderAccount> ProviderAccounts => Set<ProviderAccount>();
     public DbSet<ProviderApplication> ProviderApplications => Set<ProviderApplication>();
@@ -124,6 +125,7 @@ public sealed partial class GridDbContext(DbContextOptions<GridDbContext> option
         ConfigureCatalogue(model);
         ConfigureMedia(model);
         ConfigureProviders(model);
+        ConfigureMarketplace(model);
     }
 
     private static void ConfigureCatalogue(ModelBuilder model)
@@ -134,10 +136,29 @@ public sealed partial class GridDbContext(DbContextOptions<GridDbContext> option
             e.Property(c => c.Slug).HasMaxLength(80);
             e.Property(c => c.Name).HasMaxLength(100);
             e.Property(c => c.Description).HasMaxLength(500);
+            e.Property(c => c.Section).HasMaxLength(60);
             e.HasOne<ServiceCategory>().WithMany()
                 .HasForeignKey(c => c.ParentCategoryId)
                 .OnDelete(DeleteBehavior.Restrict);
             e.HasData(CatalogueSeed.Categories());
+        });
+
+        model.Entity<ServicePackage>(e =>
+        {
+            e.HasIndex(p => p.Slug).IsUnique();
+            e.HasIndex(p => new { p.ServiceCategoryId, p.SortOrder });
+            e.Property(p => p.Slug).HasMaxLength(80);
+            e.Property(p => p.Group).HasMaxLength(80);
+            e.Property(p => p.Name).HasMaxLength(80);
+            e.Property(p => p.Summary).HasMaxLength(300);
+            e.Property(p => p.UnitLabel).HasMaxLength(20);
+            e.Property(p => p.Includes).HasMaxLength(2000);
+            e.Property(p => p.Excludes).HasMaxLength(2000);
+            e.Property(p => p.Price).HasPrecision(12, 2);
+            e.HasOne<ServiceCategory>().WithMany()
+                .HasForeignKey(p => p.ServiceCategoryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasData(CatalogueSeed.ServicePackages());
         });
 
         model.Entity<ServiceArea>(e =>
@@ -145,6 +166,7 @@ public sealed partial class GridDbContext(DbContextOptions<GridDbContext> option
             e.HasIndex(a => new { a.Region, a.Name }).IsUnique();
             e.Property(a => a.Name).HasMaxLength(100);
             e.Property(a => a.Region).HasMaxLength(100);
+            e.Ignore(a => a.Centre);
             e.HasData(CatalogueSeed.Areas());
         });
     }

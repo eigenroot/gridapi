@@ -3,6 +3,7 @@ using Grid.Api.Data;
 using Grid.Api.Features.Consumers;
 using Grid.Api.Features.Marketplace;
 using Grid.Api.Features.Media;
+using Grid.Api.Features.ProviderLeads;
 using Grid.Api.Features.Providers;
 using Grid.Api.Features.Support;
 using Microsoft.EntityFrameworkCore;
@@ -46,6 +47,19 @@ public sealed record OpsRequestRow(
 
 public sealed record RecordPayoutRequest(Guid? ProviderAccountId, string? ExternalReference);
 
+public sealed record OpsProviderLeadRow(
+    Guid Id, string Reference, string FullName, string PhoneNumber, List<string> Services, string Area, string Experience,
+    string Source, string? Medium, string? Campaign, ProviderLeadStage Stage,
+    Guid? ProviderAccountId, ApplicationStatus? ApplicationStatus, int? ApplicationStep,
+    DateTimeOffset CreatedAt, DateTimeOffset LastAppliedAt, DateTimeOffset? SmsSentAt, DateTimeOffset? SignedInAt,
+    DateTimeOffset? FirstJobAt, DateTimeOffset? ContactedAt, string? ContactNote);
+
+/// <summary><c>byStage</c> and <c>bySource</c> count every lead, whatever the filters; <c>leads</c> is filtered.</summary>
+public sealed record OpsProviderLeadList(
+    int Total, Dictionary<string, int> ByStage, Dictionary<string, int> BySource, List<OpsProviderLeadRow> Leads);
+
+public sealed record LeadContactedRequest(string? Note);
+
 /// <summary>
 /// What GRID staff need until the Ops console exists: review applications, look after bookings
 /// nobody took, close jobs, record payouts and answer tickets. Driven with curl for now.
@@ -73,6 +87,9 @@ public static class OpsEndpoints
         ops.MapPost("/jobs/{id:guid}/confirm-completion", ConfirmJob);
 
         ops.MapPost("/provider-payouts", RecordPayout);
+
+        ops.MapGet("/provider-leads", ListLeads);
+        ops.MapPost("/provider-leads/{id:guid}/contacted", MarkLeadContacted);
 
         ops.MapGet("/support-tickets", ListTickets);
         ops.MapPost("/support-tickets/{id:guid}/resolve", ResolveTicket);
@@ -328,6 +345,72 @@ public static class OpsEndpoints
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
         return Envelope.Created(ProviderWorkEndpoints.Map(payout));
+    }
+
+    // ── Provider leads ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Website applications, newest first, each with the stage it has reached in GRID Pro.
+    /// <c>source=direct</c> matches leads that arrived without one.
+    /// </summary>
+    private static async Task<EnvelopeResult<OpsProviderLeadList>> ListLeads(
+        ProviderLeadStage? stage, string? source, OpsAccess ops, GridDbContext db, CancellationToken ct)
+    {
+        await ops.RequireAsync(ct);
+        var rows = await LeadRowsAsync(db, null, ct);
+
+        var byStage = Enum.GetValues<ProviderLeadStage>().ToDictionary(s => s.ToString(), s => rows.Count(r => r.Stage == s));
+        var bySource = rows.GroupBy(r => r.Source).OrderByDescending(g => g.Count()).ThenBy(g => g.Key)
+            .ToDictionary(g => g.Key, g => g.Count());
+        var wantedSource = string.IsNullOrWhiteSpace(source) ? null : source.Trim();
+        var filtered = rows
+            .Where(r => stage is null || r.Stage == stage)
+            .Where(r => wantedSource is null || string.Equals(r.Source, wantedSource, StringComparison.OrdinalIgnoreCase))
+            .Take(500).ToList();
+        return Envelope.Ok(new OpsProviderLeadList(rows.Count, byStage, bySource, filtered));
+    }
+
+    /// <summary>Records that someone at GRID followed the lead up, with an optional note. Calling again replaces both.</summary>
+    private static async Task<EnvelopeResult<OpsProviderLeadRow>> MarkLeadContacted(
+        Guid id, HttpRequest http, OpsAccess ops, GridDbContext db, TimeProvider time, CancellationToken ct)
+    {
+        var staff = await ops.RequireAsync(ct);
+        var v = new Validator();
+        var note = v.Optional("note", (await OptionalBody.ReadAsync<LeadContactedRequest>(http, ct))?.Note, 2000, "Note");
+        v.ThrowIfInvalid();
+        var lead = await db.ProviderLeads.SingleOrDefaultAsync(l => l.Id == id, ct)
+                   ?? throw Errors.NotFound("leads.not_found", "That lead was not found.");
+        lead.ContactedAt = time.GetUtcNow();
+        lead.ContactedByConsumerId = staff.Id;
+        lead.ContactNote = note;
+        await db.SaveChangesAsync(ct);
+        return Envelope.Ok((await LeadRowsAsync(db, id, ct)).Single());
+    }
+
+    private static async Task<List<OpsProviderLeadRow>> LeadRowsAsync(GridDbContext db, Guid? onlyId, CancellationToken ct)
+    {
+        var leads = await db.ProviderLeads.AsNoTracking()
+            .Where(l => onlyId == null || l.Id == onlyId)
+            .OrderByDescending(l => l.CreatedAt).ToListAsync(ct);
+        var accountIds = leads.Where(l => l.ProviderAccountId != null).Select(l => l.ProviderAccountId!.Value).Distinct().ToList();
+        var applications = await db.ProviderApplications.Where(a => accountIds.Contains(a.ProviderAccountId))
+            .Select(a => new { a.ProviderAccountId, a.Status, a.CurrentStep })
+            .ToDictionaryAsync(a => a.ProviderAccountId, ct);
+        var firstJobs = await db.Jobs.Where(j => accountIds.Contains(j.ProviderAccountId))
+            .GroupBy(j => j.ProviderAccountId)
+            .Select(g => new { AccountId = g.Key, First = g.Min(j => j.AcceptedAt) })
+            .ToDictionaryAsync(x => x.AccountId, x => x.First, ct);
+
+        return leads.Select(l =>
+        {
+            var application = l.ProviderAccountId is { } a && applications.TryGetValue(a, out var app) ? app : null;
+            DateTimeOffset? firstJob = l.ProviderAccountId is { } b && firstJobs.TryGetValue(b, out var first) ? first : null;
+            return new OpsProviderLeadRow(l.Id, l.Reference, l.FullName, l.PhoneNumber, l.Services, l.Area, l.Experience,
+                l.Source ?? ProviderLeadStages.Direct, l.Medium, l.Campaign,
+                ProviderLeadStages.Of(l, application?.Status, firstJob),
+                l.ProviderAccountId, application?.Status, application?.CurrentStep,
+                l.CreatedAt, l.LastAppliedAt, l.SmsSentAt, l.SignedInAt, firstJob, l.ContactedAt, l.ContactNote);
+        }).ToList();
     }
 
     // ── Support ────────────────────────────────────────────────────────────

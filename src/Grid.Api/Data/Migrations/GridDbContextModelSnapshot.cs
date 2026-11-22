@@ -26,6 +26,9 @@ namespace Grid.Api.Data.Migrations
             modelBuilder.HasSequence<int>("job_number_seq")
                 .StartsAt(1001L);
 
+            modelBuilder.HasSequence<int>("provider_lead_number_seq")
+                .StartsAt(1001L);
+
             modelBuilder.HasSequence<int>("provider_payout_number_seq")
                 .StartsAt(1001L);
 
@@ -3657,6 +3660,139 @@ namespace Grid.Api.Data.Migrations
                     b.ToTable("properties", (string)null);
                 });
 
+            modelBuilder.Entity("Grid.Api.Features.ProviderLeads.ProviderLead", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Area")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("area");
+
+                    b.Property<string>("Campaign")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("campaign");
+
+                    b.Property<DateTimeOffset>("ConsentAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("consent_at");
+
+                    b.Property<Guid?>("ConsumerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("consumer_id");
+
+                    b.Property<string>("ContactNote")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("contact_note");
+
+                    b.Property<DateTimeOffset?>("ContactedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("contacted_at");
+
+                    b.Property<Guid?>("ContactedByConsumerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("contacted_by_consumer_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Experience")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)")
+                        .HasColumnName("experience");
+
+                    b.Property<string>("FullName")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("full_name");
+
+                    b.Property<DateTimeOffset>("LastAppliedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_applied_at");
+
+                    b.Property<string>("Medium")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("medium");
+
+                    b.Property<int>("Number")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("number")
+                        .HasDefaultValueSql("nextval('provider_lead_number_seq')");
+
+                    b.Property<string>("PhoneNumber")
+                        .IsRequired()
+                        .HasMaxLength(12)
+                        .HasColumnType("character varying(12)")
+                        .HasColumnName("phone_number");
+
+                    b.Property<Guid?>("ProviderAccountId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("provider_account_id");
+
+                    b.PrimitiveCollection<List<string>>("Services")
+                        .IsRequired()
+                        .HasColumnType("text[]")
+                        .HasColumnName("services");
+
+                    b.Property<DateTimeOffset?>("SignedInAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("signed_in_at");
+
+                    b.Property<string>("SmsProviderMessageId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("sms_provider_message_id");
+
+                    b.Property<DateTimeOffset?>("SmsSentAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("sms_sent_at");
+
+                    b.Property<string>("Source")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("source");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_provider_leads");
+
+                    b.HasIndex("ConsumerId")
+                        .HasDatabaseName("ix_provider_leads_consumer_id");
+
+                    b.HasIndex("ContactedByConsumerId")
+                        .HasDatabaseName("ix_provider_leads_contacted_by_consumer_id");
+
+                    b.HasIndex("CreatedAt")
+                        .HasDatabaseName("ix_provider_leads_created_at");
+
+                    b.HasIndex("Number")
+                        .IsUnique()
+                        .HasDatabaseName("ix_provider_leads_number");
+
+                    b.HasIndex("PhoneNumber")
+                        .IsUnique()
+                        .HasDatabaseName("ix_provider_leads_phone_number");
+
+                    b.HasIndex("ProviderAccountId")
+                        .HasDatabaseName("ix_provider_leads_provider_account_id");
+
+                    b.ToTable("provider_leads", (string)null);
+                });
+
             modelBuilder.Entity("Grid.Api.Features.Providers.PayoutMethod", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4961,6 +5097,27 @@ namespace Grid.Api.Data.Migrations
                         .HasForeignKey("ServiceAreaId")
                         .OnDelete(DeleteBehavior.SetNull)
                         .HasConstraintName("fk_properties_service_areas_service_area_id");
+                });
+
+            modelBuilder.Entity("Grid.Api.Features.ProviderLeads.ProviderLead", b =>
+                {
+                    b.HasOne("Grid.Api.Features.Consumers.Consumer", null)
+                        .WithMany()
+                        .HasForeignKey("ConsumerId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_provider_leads_consumers_consumer_id");
+
+                    b.HasOne("Grid.Api.Features.Consumers.Consumer", null)
+                        .WithMany()
+                        .HasForeignKey("ContactedByConsumerId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_provider_leads_consumers_contacted_by_consumer_id");
+
+                    b.HasOne("Grid.Api.Features.Providers.ProviderAccount", null)
+                        .WithMany()
+                        .HasForeignKey("ProviderAccountId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_provider_leads_provider_accounts_provider_account_id");
                 });
 
             modelBuilder.Entity("Grid.Api.Features.Providers.PayoutMethod", b =>

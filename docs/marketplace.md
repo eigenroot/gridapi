@@ -117,6 +117,7 @@ POST /ops/service-requests/{id}/refund            refunds a paid booking that is
 POST /ops/jobs/{id}/confirm-completion
 POST /ops/provider-payouts   { providerAccountId, externalReference? }   records everything available as paid
 GET  /ops/support-tickets[?status=]                  POST /ops/support-tickets/{id}/resolve {note}
+GET  /ops/provider-leads[?stage=&source=]           POST /ops/provider-leads/{id}/contacted {note?}
 ```
 
 ## Configuration

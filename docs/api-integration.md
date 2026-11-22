@@ -248,6 +248,65 @@ Draft → Submitted → UnderReview → Approved
 
 There is no push channel, so clients poll for the decision.
 
+## Provider applications from the website
+
+The public website collects provider applications and posts them from **its server** (a Next.js
+server action), never from the browser, so the key stays secret and no CORS is needed.
+
+```
+POST /provider-leads
+X-Grid-Web-Key: <Leads:WebKey>
+X-Grid-Client-Ip: <the visitor's IP, as the website's host forwarded it>
+
+{ "fullName": "Akosua Boateng", "phoneNumber": "0241234567",
+  "services": ["cleaning", "laundry"], "area": "East Legon", "experience": "1to3",
+  "source": "facebook", "medium": "paid", "campaign": "cleaners-nov", "consent": true }
+
+→ 200 { "reference": "L-1001", "alreadyRegistered": false }
+```
+
+- No bearer token. A missing or wrong `X-Grid-Web-Key` (or no `Leads:WebKey` configured) is
+  **401 `leads.unauthorized`**.
+- `services`: one or more launched top-level catalogue slugs (`cleaning`, `laundry`,
+  `ac-servicing`, `pest-control`). `experience`: `lt1`, `1to3`, `3to5` or `5plus`. `consent` must be
+  `true`. `source`, `medium`, `campaign` are optional (100 characters each). Problems come back
+  together as **400 `validation.failed`** with `fields[]` keyed `fullName`, `phoneNumber`,
+  `services`, `area`, `experience`, `source`, `medium`, `campaign`, `consent`.
+- **One lead per phone.** Applying again with the same number (in any format) updates the name,
+  services, area and experience and returns the same `reference`; the first `source`/`medium`/
+  `campaign` are kept.
+- The phone gets one SMS with the GRID Pro link (`Leads:ProDownloadUrl`), at most once every
+  6 hours however often they apply. A failed SMS doesn't fail the request; the next application
+  tries again.
+- `alreadyRegistered` is `true` when that phone already has a provider account: tell them to sign
+  in to GRID Pro instead.
+- Rate limit: `Leads:PerIpPerHour` (default 20) per visitor IP. `X-Grid-Client-Ip` is only trusted
+  with a valid key; otherwise the caller's own IP counts. Over the limit is
+  **429 `leads.rate_limited`** with `detail.retryAfterSeconds`.
+
+**Linking happens on its own.** When that phone signs in to GRID Pro (`X-Grid-App: pro`) the lead
+records the sign-in, and `POST /provider-accounts` attaches the new account. From there the lead's
+stage follows the application.
+
+**Ops** (`Ops:Operators` only, else 403 `ops.forbidden`):
+
+```
+GET  /ops/provider-leads[?stage=&source=]
+     → { total, byStage: { Applied: 3, SignedIn: 1, … }, bySource: { facebook: 2, direct: 2 },
+         leads: [ { id, reference, fullName, phoneNumber, services, area, experience, source,
+                    medium, campaign, stage, providerAccountId, applicationStatus, applicationStep,
+                    createdAt, lastAppliedAt, smsSentAt, signedInAt, firstJobAt, contactedAt,
+                    contactNote } ] }
+POST /ops/provider-leads/{id}/contacted   { "note"? }   → the lead row
+```
+
+`stage` is derived on every read: `Applied` → `SignedIn` (used GRID Pro) → `Onboarding` (has an
+account; `applicationStep` is where they are) → `Submitted` (submitted or under review) →
+`Approved` / `Rejected` → `FirstJob` (accepted a job; `firstJobAt`). An application sent back for
+more information counts as `Onboarding`. Leads without a source show and filter as `direct`.
+`byStage` and `bySource` count every lead; the filters only narrow `leads` (newest first, 500 at
+most).
+
 ## Error codes worth handling
 
 | Code | Meaning |
@@ -294,6 +353,9 @@ There is no push channel, so clients poll for the decision.
 | `payments.receipt_not_ready` | The order hasn't been paid yet |
 | `payments.provider_unavailable` | Hubtel didn't answer; try again shortly |
 | `payments.rate_limited` | Too many orders or lookups in a minute |
+| `leads.unauthorized` | Website lead posted without the right `X-Grid-Web-Key` (**401**) |
+| `leads.rate_limited` | Too many website applications from one visitor IP (**429**) |
+| `leads.not_found` | Ops: no lead with that id |
 
 ## The provider's working day
 

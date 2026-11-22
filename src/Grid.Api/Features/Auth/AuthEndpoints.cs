@@ -1,6 +1,7 @@
 using Grid.Api.Common;
 using Grid.Api.Data;
 using Grid.Api.Features.Consumers;
+using Grid.Api.Features.ProviderLeads;
 using Grid.Api.Features.Providers;
 using Microsoft.EntityFrameworkCore;
 
@@ -50,6 +51,7 @@ public static class AuthEndpoints
         TokenService tokens,
         GridDbContext db,
         TimeProvider time,
+        ProviderLeadLinker leads,
         CancellationToken ct)
     {
         var phone = PhoneNumbers.Normalize(body.PhoneNumber);
@@ -99,6 +101,9 @@ public static class AuthEndpoints
             consumer = await db.Consumers.SingleAsync(c => c.PhoneNumber == phone, ct);
             isNew = false;
         }
+
+        // Someone who applied on the website has now got GRID Pro.
+        if (client.App == AppKind.Pro) await leads.SignedInAsync(consumer.Id, phone, ct);
 
         var issued = await tokens.IssueAsync(consumer, client, ct);
         return Envelope.Ok(await ToSessionAsync(db, issued, consumer, isNew, ct));

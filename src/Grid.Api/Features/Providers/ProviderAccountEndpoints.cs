@@ -1,6 +1,7 @@
 using Grid.Api.Common;
 using Grid.Api.Data;
 using Grid.Api.Features.Consumers;
+using Grid.Api.Features.ProviderLeads;
 using Microsoft.EntityFrameworkCore;
 
 namespace Grid.Api.Features.Providers;
@@ -66,7 +67,7 @@ public static class ProviderAccountEndpoints
     /// There is no provider-specific sign-up; <c>user.providerAccountId</c> is set from here on.
     /// </summary>
     private static async Task<EnvelopeResult<ProviderAccountResponse>> Create(
-        CreateProviderAccountRequest body, CurrentConsumer current, GridDbContext db, CancellationToken ct)
+        CreateProviderAccountRequest body, CurrentConsumer current, GridDbContext db, ProviderLeadLinker leads, CancellationToken ct)
     {
         var v = new Validator();
         if (body.AccountType is null) v.Add("accountType", "Choose individual or business.");
@@ -97,6 +98,7 @@ public static class ProviderAccountEndpoints
             throw AlreadyExists();
         }
         await tx.CommitAsync(ct);
+        await leads.AccountCreatedAsync(consumer.Id, consumer.PhoneNumber, account.Id, ct);
 
         return Envelope.Created(ProviderAccountResponse.From(account));
     }

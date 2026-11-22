@@ -126,6 +126,7 @@ public sealed partial class GridDbContext(DbContextOptions<GridDbContext> option
         ConfigureMedia(model);
         ConfigureProviders(model);
         ConfigureMarketplace(model);
+        ConfigureProviderLeads(model);
     }
 
     private static void ConfigureCatalogue(ModelBuilder model)

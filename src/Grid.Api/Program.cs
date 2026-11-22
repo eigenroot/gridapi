@@ -11,6 +11,7 @@ using Grid.Api.Features.Marketplace;
 using Grid.Api.Features.Media;
 using Grid.Api.Features.Ops;
 using Grid.Api.Features.Properties;
+using Grid.Api.Features.ProviderLeads;
 using Grid.Api.Features.Providers;
 using Grid.Api.Features.Support;
 using Grid.Api.Features.UtilityAccounts;
@@ -43,6 +44,8 @@ services.AddOptions<PayoutOptions>().Bind(config.GetSection(PayoutOptions.Sectio
 services.AddOptions<BillPaymentOptions>().Bind(config.GetSection(BillPaymentOptions.Section)).ValidateOnStart();
 services.AddOptions<MarketplaceOptions>().Bind(config.GetSection(MarketplaceOptions.Section)).ValidateOnStart();
 services.AddOptions<OpsOptions>().Bind(config.GetSection(OpsOptions.Section));
+services.AddOptions<LeadOptions>().Bind(config.GetSection(LeadOptions.Section)).ValidateOnStart();
+services.AddSingleton<IValidateOptions<LeadOptions>, LeadOptionsValidator>();
 services.AddSingleton<IValidateOptions<MarketplaceOptions>, MarketplaceOptionsValidator>();
 services.AddSingleton<IValidateOptions<OtpOptions>, OtpOptionsValidator>();
 services.AddSingleton<IValidateOptions<JwtOptions>, JwtOptionsValidator>();
@@ -138,6 +141,7 @@ services.AddScoped<JobService>();
 services.AddScoped<MarketplaceProcessor>();
 services.AddHostedService<MarketplaceWorker>();
 services.AddScoped<OpsAccess>();
+services.AddScoped<ProviderLeadLinker>();
 
 services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer();
 services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
@@ -190,12 +194,25 @@ services.AddRateLimiter(o =>
             PermitLimit = config.GetValue("RateLimits:PaymentsPerUserPerMinute", 30),
             Window = TimeSpan.FromMinutes(1),
         }));
+    // Website applications. Keyed on the visitor's IP the website reports, once its key checks out.
+    o.AddPolicy(ProviderLeadEndpoints.RateLimitPolicy, http => RateLimitPartition.GetFixedWindowLimiter(
+        ProviderLeadEndpoints.RateLimitKey(http),
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = config.GetValue("Leads:PerIpPerHour", 20),
+            Window = TimeSpan.FromHours(1),
+        }));
     o.OnRejected = async (ctx, _) =>
     {
         var retryAfter = ctx.Lease.TryGetMetadata(MetadataName.RetryAfter, out var r) ? (int)r.TotalSeconds : 3600;
         var policy = ctx.HttpContext.GetEndpoint()?.Metadata.GetMetadata<Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute>()?.PolicyName;
         await Envelope.WriteErrorAsync(ctx.HttpContext, StatusCodes.Status429TooManyRequests,
-            policy == BillPaymentEndpoints.RateLimitPolicy ? "payments.rate_limited" : "auth.otp_rate_limited",
+            policy switch
+            {
+                BillPaymentEndpoints.RateLimitPolicy => "payments.rate_limited",
+                ProviderLeadEndpoints.RateLimitPolicy => "leads.rate_limited",
+                _ => "auth.otp_rate_limited",
+            },
             "Too many requests. Try again later.", new { retryAfterSeconds = retryAfter });
     };
 });
@@ -249,6 +266,7 @@ api.MapProviderProfileEndpoints();
 api.MapProviderWorkEndpoints();
 api.MapServiceRequestEndpoints();
 api.MapSupportEndpoints();
+api.MapProviderLeadEndpoints();
 api.MapOpsEndpoints();
 api.MapBillPaymentEndpoints();
 

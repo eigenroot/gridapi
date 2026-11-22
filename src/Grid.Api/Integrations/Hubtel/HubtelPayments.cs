@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Grid.Api.Common;
 using Grid.Api.Features.BillPayments;
 using Microsoft.Extensions.Options;
@@ -52,7 +53,7 @@ public sealed record BeneficiaryLookup(
 /// Commission Services lookups only answers whitelisted server IPs. Nothing here retries; callers
 /// decide what an unclear answer means.
 /// </summary>
-public sealed class HubtelPayments(HttpClient http, IOptions<BillPaymentOptions> options, ILogger<HubtelPayments> logger)
+public sealed partial class HubtelPayments(HttpClient http, IOptions<BillPaymentOptions> options, ILogger<HubtelPayments> logger)
 {
     private HubtelPaymentOptions Config => options.Value.Hubtel;
 
@@ -297,8 +298,35 @@ public sealed class HubtelPayments(HttpClient http, IOptions<BillPaymentOptions>
     }
 
     /// <summary>Telecel puts the plan in Display and the size in Value; the other telcos put both in Display.</summary>
-    private static string BundleLabel(BillProduct product, string display, string value) =>
-        product.Network == PhoneNetwork.Telecel && !display.Contains(value, StringComparison.OrdinalIgnoreCase) ? $"{display} · {value}" : display;
+    /// <summary>
+    /// The bundle's name as a customer should read it. Telecel's own name can leave out the size,
+    /// which is then its value ("Chat Monthly" + "2 GB"); other Telecel values are internal codes
+    /// such as <c>DATANVSTRDLY</c> and are left out. A price in the name ("(GHs 0.5)") is dropped,
+    /// because the amount is sent separately.
+    /// </summary>
+    internal static string BundleLabel(BillProduct product, string display, string value)
+    {
+        var label = PriceInName().Replace(display, " ");
+        label = SpaceBeforeComma().Replace(label, ",");
+        label = Spaces().Replace(label, " ").Trim().Trim('-', '·', ',').Trim();
+        var size = value.Trim();
+        if (product.Network == PhoneNetwork.Telecel && DataSize().IsMatch(size)
+            && !label.Contains(size, StringComparison.OrdinalIgnoreCase))
+            label = label.Length == 0 ? size : $"{label} · {size}";
+        return label.Length == 0 ? display.Trim() : label;
+    }
+
+    [GeneratedRegex(@"\(\s*(?:GH[S₵C]?|GHs|GH¢|₵)\s*[\d.,]+\s*\)", RegexOptions.IgnoreCase)]
+    private static partial Regex PriceInName();
+
+    [GeneratedRegex(@"^\d+(?:[.,]\d+)?\s?(?:KB|MB|GB|TB)$", RegexOptions.IgnoreCase)]
+    private static partial Regex DataSize();
+
+    [GeneratedRegex(@"\s+,")]
+    private static partial Regex SpaceBeforeComma();
+
+    [GeneratedRegex(@"\s{2,}")]
+    private static partial Regex Spaces();
 
     // ---- HTTP ----
 

@@ -151,6 +151,27 @@ public class HubtelPaymentsTests
         Assert.Equal([new("2 GB", "Chat Monthly · 2 GB", 20m), new BundleOption("25 MB", "Starter Daily · 25 MB", 0.5m)], lookup.Bundles);
     }
 
+    [Fact]
+    public void Telecel_bundle_codes_and_prices_stay_out_of_the_label()
+    {
+        var lookup = HubtelPayments.InterpretLookup(Product("TelecelData"), "233206439599", HttpStatusCode.OK, """
+            {"ResponseCode":"0000","Data":[
+              {"Display":"No Expiry - 22.29MB (GHs 0.5)","Value":"DATANVSTRDLY","Amount":0.5},
+              {"Display":"No Expiry - 10.27GB  (GHs 100)","Value":"DATANVDBDL4","Amount":100.0}]}
+            """);
+        Assert.Equal(["No Expiry - 22.29MB", "No Expiry - 10.27GB"], lookup.Bundles.Select(b => b.Label));
+        Assert.Equal(["DATANVSTRDLY", "DATANVDBDL4"], lookup.Bundles.Select(b => b.Value));
+    }
+
+    [Fact]
+    public void Mtn_bundle_names_lose_the_space_before_a_comma()
+    {
+        var lookup = HubtelPayments.InterpretLookup(Product("MtnData"), "233597010423", HttpStatusCode.OK, """
+            {"ResponseCode":"0000","Data":[{"Display":"460.11MB Kokrokoo , 5am to 8am","Value":"kokrokoo","Amount":1.22}]}
+            """);
+        Assert.Equal("460.11MB Kokrokoo, 5am to 8am", lookup.Bundles.Single().Label);
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.OK, """{"ResponseCode":"2001","Message":"Invalid account","Data":[]}""", 404)]
     [InlineData(HttpStatusCode.NotFound, """{"ResponseCode":"4000"}""", 404)]
